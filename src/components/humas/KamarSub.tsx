@@ -74,8 +74,7 @@ export default function KamarSub({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
 
-  // View mode for detail kamar (slots vs table) & Drag and drop
-  const [viewMode, setViewMode] = useState<'slots' | 'table'>('slots');
+  // Drag and drop
   const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
   const [dragOverTopSlot, setDragOverTopSlot] = useState<number | null>(null);
@@ -1572,33 +1571,7 @@ export default function KamarSub({
                     <option value="Kampung">Kampung</option>
                   </select>
                 </div>
-
-                    {/* View Mode Toggle Buttons */}
-                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setViewMode('slots')}
-                        className={`px-3 py-1.5 text-xs font-extrabold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                          viewMode === 'slots' ? 'bg-white text-purple-700 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-                        }`}
-                        title="Tampilan Slot Lemari (Drag & Drop)"
-                      >
-                        <BedDouble className="w-3.5 h-3.5" />
-                        <span>Slot Lemari</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setViewMode('table')}
-                        className={`px-3 py-1.5 text-xs font-extrabold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                          viewMode === 'table' ? 'bg-white text-purple-700 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-                        }`}
-                        title="Tampilan Tabel List"
-                      >
-                        <FileSpreadsheet className="w-3.5 h-3.5" />
-                        <span>Tabel List</span>
-                      </button>
-                    </div>
-                  </div>
+              </div>
 
               {/* Bulk Action Bar Banner */}
               {selectedStudentIds.length > 0 && (
@@ -1647,10 +1620,8 @@ export default function KamarSub({
               )}
             </div>
 
-            {/* DETAIL VIEW CONTENT: SLOTS OR TABLE */}
-            {viewMode === 'slots' ? (
-              /* SLOTS / LEMARI CAPACITY VISUALIZATION (DRAG & DROP) */
-              (() => {
+            {/* DETAIL VIEW CONTENT: SLOT LEMARI VISUALIZATION */}
+            {(() => {
                 const roomCapacity = activeRoomForDetail.kapasitas || 15;
                 const slotNumbers = Array.from({ length: roomCapacity }, (_, i) => i + 1);
 
@@ -1955,222 +1926,7 @@ export default function KamarSub({
                     </div>
                   </div>
                 );
-              })()
-            ) : (
-            <>
-            {/* Responsive Santri Table */}
-            <div className="relative rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
-              <div 
-                ref={tableContainerRef}
-                onScroll={updateScrollButtons}
-                className="overflow-x-auto min-h-[350px]"
-              >
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500 font-extrabold select-none">
-                      {isSelectionMode && (
-                        <th className="py-3 px-3 w-10 text-center">
-                          <input
-                            type="checkbox"
-                            checked={paginatedStudents.length > 0 && paginatedStudents.every(s => selectedStudentIds.includes(s.id))}
-                            onChange={e => {
-                              if (e.target.checked) {
-                                const newIds = Array.from(new Set([...selectedStudentIds, ...paginatedStudents.map(s => s.id)]));
-                                setSelectedStudentIds(newIds);
-                              } else {
-                                const pageIds = paginatedStudents.map(s => s.id);
-                                setSelectedStudentIds(selectedStudentIds.filter(id => !pageIds.includes(id)));
-                              }
-                            }}
-                            className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                          />
-                        </th>
-                      )}
-                      <th className="py-3 px-3.5 w-12 text-center">No</th>
-                      {renderSortableHeader('No. Lemari', 'nomorLemari', 'py-3 px-3.5 w-28 text-center')}
-                      {renderSortableHeader('Nama Santri', 'nama', 'py-3 px-3.5 min-w-[200px] relative')}
-                      {renderSortableHeader('NIS', 'nis', 'py-3 px-3.5 w-28')}
-                      {renderSortableHeader('Alamat', 'alamat', 'py-3 px-3.5 w-48')}
-                      <th className="py-3 px-3.5 w-20 text-center sticky right-0 bg-slate-100/95 backdrop-blur-xs z-10 border-l border-slate-200/60 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.05)]">
-                        Aksi
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
-                    {paginatedStudents.length === 0 ? (
-                      <tr>
-                        <td colSpan={isSelectionMode ? 7 : 6} className="py-12 text-center text-slate-400 font-medium">
-                          Belum ada santri terdaftar di kamar ini.
-                        </td>
-                      </tr>
-                    ) : (
-                      paginatedStudents.map((s, idx) => {
-                        const isChecked = selectedStudentIds.includes(s.id);
-                        const isKetua = Boolean(
-                          activeRoomForDetail?.ketuaKamar && 
-                          activeRoomForDetail.ketuaKamar.trim().toLowerCase() === s.nama.trim().toLowerCase()
-                        );
-
-                        return (
-                          <tr 
-                            key={s.id}
-                            className={`hover:bg-purple-50/20 transition-colors ${isChecked ? 'bg-purple-50/40' : ''}`}
-                          >
-                            {isSelectionMode && (
-                              <td className="py-3 px-3 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => {
-                                    if (isChecked) setSelectedStudentIds(selectedStudentIds.filter(id => id !== s.id));
-                                    else setSelectedStudentIds([...selectedStudentIds, s.id]);
-                                  }}
-                                  className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                />
-                              </td>
-                            )}
-                            {/* No */}
-                            <td className="py-3 px-3.5 text-center font-mono text-slate-400 text-[11px]">
-                              <div className="flex items-center justify-center gap-1">
-                                {isKetua && (
-                                  <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-400 shrink-0" />
-                                )}
-                                <span className={isKetua ? "font-bold text-amber-600" : ""}>{startIndex + idx + 1}</span>
-                              </div>
-                            </td>
-                            {/* No. Lemari */}
-                            <td className="py-3 px-3.5 text-center">
-                              {editingLemariStudent?.id === s.id ? (
-                                <div className="flex items-center justify-center gap-1">
-                                  <input
-                                    type="text"
-                                    value={tempLemariValue}
-                                    onChange={e => setTempLemariValue(e.target.value)}
-                                    placeholder="No..."
-                                    className="w-16 px-2 py-0.5 text-center font-mono text-xs border border-purple-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    autoFocus
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      onUpdateSantriRoom(s.id, activeRoomForDetail.nama, tempLemariValue.trim());
-                                      setEditingLemariStudent(null);
-                                      showToast('Nomor lemari diperbarui.');
-                                    }}
-                                    className="p-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
-                                  >
-                                    <Check className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    onClick={() => setEditingLemariStudent(null)}
-                                    className="p-1 bg-slate-200 text-slate-600 rounded hover:bg-slate-300"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <span 
-                                  onClick={() => {
-                                    if (canWriteCurrent) {
-                                      setEditingLemariStudent(s);
-                                      setTempLemariValue(s.nomorLemari || '');
-                                    }
-                                  }}
-                                  className="font-mono font-bold text-xs bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-700 px-2 py-0.5 rounded-md cursor-pointer border border-slate-200 transition-colors inline-block"
-                                  title="Klik untuk ubah nomor lemari"
-                                >
-                                  {s.nomorLemari || '-'}
-                                </span>
-                              )}
-                            </td>
-                            {/* Nama Santri */}
-                            <td className="py-3 px-3.5">
-                              <div 
-                                onClick={() => setSelectedSantriForDetail(s)}
-                                className="flex items-center gap-2.5 cursor-pointer group"
-                                title="Klik untuk lihat biodata lengkap"
-                              >
-                                {renderSantriAvatar(s, "w-8 h-8 rounded-full border border-slate-200 text-xs font-bold")}
-                                <div>
-                                  <p className="font-extrabold text-slate-800 group-hover:text-purple-600 transition-colors">
-                                    {s.nama}
-                                  </p>
-                                  <div className="flex items-center gap-1 mt-0.5">
-                                    <span className="inline-block text-[9.5px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
-                                      {s.statusDomisili || s.status || 'Muqim'}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                            {/* NIS */}
-                            <td className="py-3 px-3.5 font-mono text-slate-600 font-bold text-[11px]">
-                              {s.nis || '-'}
-                            </td>
-                            <td className="py-3 px-3.5 text-slate-500 text-[11px] truncate max-w-[180px]">
-                              {s.desa ? `Ds. ${s.desa}, Kec. ${s.kecamatan || '-'}` : (s.alamat || s.asal || '-')}
-                            </td>
-                            <td className="py-3 px-3.5 text-center sticky right-0 bg-white group-hover:bg-purple-50/30 z-10 border-l border-slate-100 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.03)]">
-                              <div className="flex items-center justify-center">
-                                {canWriteCurrent && (
-                                  <button
-                                    onClick={e => handleOpenMenu(e, 'santri', s.id, s)}
-                                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-                                    title="Opsi Santri"
-                                  >
-                                    <MoreVertical className="w-4 h-4" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-100 shadow-xs text-xs font-bold text-slate-600">
-                <span>
-                  Halaman {activePage} dari {totalPages} ({sortedStudents.length} Santri)
-                </span>
-
-                <div className="flex items-center gap-1.5 self-center">
-                  <button
-                    disabled={activePage === 1}
-                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                    className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                    <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      className={`h-8 w-8 rounded-lg font-bold transition-colors cursor-pointer ${
-                        page === activePage ? 'bg-purple-600 text-white' : 'hover:bg-slate-100 text-slate-700'
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  ))}
-
-                  <button
-                    disabled={activePage === totalPages}
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                    className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-                  </>
-                )}
+              })()}
               </>
             ) : (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-12 text-center space-y-3">
