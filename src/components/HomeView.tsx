@@ -1,25 +1,21 @@
-import React from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
-  FileText, 
-  Wallet, 
-  BookOpen, 
-  Users, 
-  ShieldAlert, 
-  MoreVertical,
-  Building,
-  School,
-  GraduationCap,
-  UserCheck,
-  Shield,
-  RefreshCw,
-  UserPlus,
-  Download,
+  Search, 
+  Plus, 
+  Trash2, 
+  Check, 
+  ChevronDown, 
+  ChevronUp, 
+  ArrowUpRight, 
+  X,
   Smartphone,
-  Share2,
-  X
+  Download,
+  AlertTriangle,
+  CheckCircle2,
+  ListTodo
 } from 'lucide-react';
-import { Santri, Surat, KeamananRecord, BendaharaRecord, Kompleks, Kamar } from '../types';
+import { Santri, KeamananRecord, BendaharaRecord, Kompleks, Kamar } from '../types';
 import { INITIAL_KOMPLEKS, INITIAL_KAMAR } from './HumasyView';
 
 interface HomeViewProps {
@@ -30,6 +26,14 @@ interface HomeViewProps {
   onResetAllLocalData?: () => void;
 }
 
+interface TaskItem {
+  id: string;
+  text: string;
+  status: 'done' | 'pending';
+  deadline?: string;
+  color: 'green' | 'yellow' | 'blue';
+}
+
 export default function HomeView({ 
   santriList, 
   keamananList, 
@@ -37,21 +41,42 @@ export default function HomeView({
   onChangeModule,
   onResetAllLocalData
 }: HomeViewProps) {
-  const [showPwaBanner, setShowPwaBanner] = React.useState(false);
-  const [installPrompt, setInstallPrompt] = React.useState<any>(null);
-  const [isIOS, setIsIOS] = React.useState(false);
-  const [isDismissed, setIsDismissed] = React.useState(() => {
+  // PWA banner state
+  const [showPwaBanner, setShowPwaBanner] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(() => {
     return localStorage.getItem('smartsantri_pwa_dismissed') === 'true';
   });
 
-  React.useEffect(() => {
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Task list state - EMPTY default as requested (No fake dummy tasks)
+  const [tasks, setTasks] = useState<TaskItem[]>(() => {
+    try {
+      const local = localStorage.getItem('smartsantri_dashboard_tasks');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return []; // Empty by default
+  });
+
+  const [newTaskInput, setNewTaskInput] = useState('');
+  const [isAddingTask, setIsAddingTask] = useState(false);
+
+  // Save tasks to localStorage
+  useEffect(() => {
+    localStorage.setItem('smartsantri_dashboard_tasks', JSON.stringify(tasks));
+  }, [tasks]);
+
+  useEffect(() => {
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
-    if (isStandalone) {
-      return;
-    }
-    if (isDismissed) {
-      return;
-    }
+    if (isStandalone || isDismissed) return;
 
     const userAgent = window.navigator.userAgent.toLowerCase();
     const isIosDevice = /iphone|ipad|ipod/.test(userAgent);
@@ -99,8 +124,8 @@ export default function HomeView({
     setShowPwaBanner(false);
   };
 
-  // Read complexes and rooms from localStorage
-  const kompleksList: Kompleks[] = React.useMemo(() => {
+  // Complex & Room data
+  const kompleksList: Kompleks[] = useMemo(() => {
     try {
       const local = localStorage.getItem('smartsantri_kompleks');
       if (local) {
@@ -113,7 +138,7 @@ export default function HomeView({
     return INITIAL_KOMPLEKS;
   }, []);
 
-  const kamarList: Kamar[] = React.useMemo(() => {
+  const kamarList: Kamar[] = useMemo(() => {
     try {
       const local = localStorage.getItem('smartsantri_kamar');
       if (local) {
@@ -126,476 +151,719 @@ export default function HomeView({
     return INITIAL_KAMAR;
   }, []);
 
-  // Format current Indonesian date nicely
-  const formattedDate = new Intl.DateTimeFormat('id-ID', { 
-    weekday: 'long', 
-    day: 'numeric', 
-    month: 'long', 
-    year: 'numeric' 
-  }).format(new Date());
-
-  // Determine greeting based on time of day
-  const getGreeting = () => {
-    const hours = new Date().getHours();
-    if (hours < 11) return 'Selamat pagi';
-    if (hours < 15) return 'Selamat siang';
-    if (hours < 18) return 'Selamat sore';
-    return 'Selamat malam';
-  };
-
-  // 1. Calculate growth/decrease from the last 30 days based on `tanggalMasuk`
-  const today = new Date();
-  const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-  const santriTerakhir30Hari = santriList.filter(s => {
-    if (!s.tanggalMasuk) return false;
-    const entryDate = new Date(s.tanggalMasuk);
-    return entryDate >= thirtyDaysAgo && entryDate <= today;
-  }).length;
-
-  const santriSebelum30Hari = santriList.filter(s => {
-    if (!s.tanggalMasuk) return true;
-    const entryDate = new Date(s.tanggalMasuk);
-    return entryDate < thirtyDaysAgo;
-  }).length;
-
-  let percentChangeStr = '+0.0%';
-  if (santriSebelum30Hari > 0) {
-    const changeVal = (santriTerakhir30Hari / santriSebelum30Hari) * 100;
-    const sign = changeVal >= 0 ? '+' : '';
-    percentChangeStr = `${sign}${changeVal.toFixed(1)}%`;
-  } else if (santriTerakhir30Hari > 0) {
-    percentChangeStr = `+100.0%`;
-  }
-
-  // Compute stats
+  // 1. Data Santri Real Breakdown
   const totalSantriReal = santriList.length;
 
-  const activePutra = santriList.filter(s => s.statusKeanggotaan === 'Aktif' && s.gender === 'Putra');
-  const activePutri = santriList.filter(s => s.statusKeanggotaan === 'Aktif' && s.gender === 'Putri');
+  const putraAktif = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putra' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan)).length
+  , [santriList]);
 
-  const putraComplexesCount = kompleksList.filter(k => k.gender === 'Putra').length;
-  const putriComplexesCount = kompleksList.filter(k => k.gender === 'Putri').length;
-  const totalAsramaAccum = kompleksList.length;
+  const putraAlumni = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putra' && s.statusKeanggotaan === 'Alumni').length
+  , [santriList]);
 
-  // Kamar Putra Terisi (Dynamic based on active Putra)
-  const putraRooms = kamarList.filter(k => {
-    const komp = kompleksList.find(c => c.id === k.kompleksId);
-    return komp && komp.gender === 'Putra';
-  });
-  const totalPutraBedsCapacity = putraRooms.reduce((sum, r) => sum + (r.kapasitas || 0), 0);
+  const putraMeninggal = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putra' && s.statusKeanggotaan === 'Meninggal').length
+  , [santriList]);
 
-  const isValidRoomName = (kamarStr?: string) => {
-    if (!kamarStr) return false;
-    const clean = kamarStr.trim().toLowerCase();
-    return clean !== '' && 
-           clean !== 'tanpa kamar' && 
-           clean !== 'belum diatur' && 
-           clean !== 'belum diatur kamar' && 
-           clean !== '-';
+  const putriAktif = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putri' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan)).length
+  , [santriList]);
+
+  const putriAlumni = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putri' && s.statusKeanggotaan === 'Alumni').length
+  , [santriList]);
+
+  const putriMeninggal = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putri' && s.statusKeanggotaan === 'Meninggal').length
+  , [santriList]);
+
+  // 2. Status Domisili Real
+  const putraMuqim = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putra' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && (s.statusDomisili || s.status || 'Muqim') === 'Muqim').length
+  , [santriList]);
+
+  const putriMuqim = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putri' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && (s.statusDomisili || s.status || 'Muqim') === 'Muqim').length
+  , [santriList]);
+
+  const pctPutraMuqim = putraAktif > 0 ? Math.round((putraMuqim / putraAktif) * 100) : 0;
+  const pctPutriMuqim = putriAktif > 0 ? Math.round((putriMuqim / putriAktif) * 100) : 0;
+
+  // 3. Kamar Terisi vs Belum Ditempatkan Real
+  const putraInKamar = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putra' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && s.kamarId).length
+  , [santriList]);
+
+  const putraBelumKamar = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putra' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && !s.kamarId).length
+  , [santriList]);
+
+  const pctPutraKamar = (putraInKamar + putraBelumKamar) > 0 ? Math.round((putraInKamar / (putraInKamar + putraBelumKamar)) * 100) : 0;
+
+  const putriInKamar = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putri' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && s.kamarId).length
+  , [santriList]);
+
+  const putriBelumKamar = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putri' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && !s.kamarId).length
+  , [santriList]);
+
+  const pctPutriKamar = (putriInKamar + putriBelumKamar) > 0 ? Math.round((putriInKamar / (putriInKamar + putriBelumKamar)) * 100) : 0;
+
+  // 4. Monitor Emis Terdaftar Real
+  const putraAktifEmis = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putra' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && (s.nis || s.nik)).length
+  , [santriList]);
+  const pctPutraAktifEmis = putraAktif > 0 ? Math.round((putraAktifEmis / putraAktif) * 100) : 0;
+
+  const putraAlumniEmis = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putra' && s.statusKeanggotaan === 'Alumni' && (s.nis || s.nik)).length
+  , [santriList]);
+  const pctPutraAlumniEmis = putraAlumni > 0 ? Math.round((putraAlumniEmis / putraAlumni) * 100) : 0;
+
+  const putriAktifEmis = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putri' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && (s.nis || s.nik)).length
+  , [santriList]);
+  const pctPutriAktifEmis = putriAktif > 0 ? Math.round((putriAktifEmis / putriAktif) * 100) : 0;
+
+  const putriAlumniEmis = useMemo(() => 
+    santriList.filter(s => s.gender === 'Putri' && s.statusKeanggotaan === 'Alumni' && (s.nis || s.nik)).length
+  , [santriList]);
+  const pctPutriAlumniEmis = putriAlumni > 0 ? Math.round((putriAlumniEmis / putriAlumni) * 100) : 0;
+
+  // 5. Aktifitas Terbaru Real
+  const latestActivity = useMemo(() => {
+    if (keamananList && keamananList.length > 0) {
+      const top = keamananList[keamananList.length - 1];
+      return {
+        time: top.tanggal || new Date().toLocaleDateString('id-ID'),
+        text: `Catatan Pelanggaran: ${top.namaSantri} (${top.deskripsi || top.pelanggaran || 'Pelanggaran baru'})`
+      };
+    }
+    if (santriList && santriList.length > 0) {
+      const lastSantri = santriList[santriList.length - 1];
+      return {
+        time: new Date().toLocaleDateString('id-ID'),
+        text: `Data ${lastSantri.nama} (${lastSantri.gender || 'Santri'}) terdaftar/diperbarui`
+      };
+    }
+    return {
+      time: '-',
+      text: 'Belum ada aktivitas terbaru'
+    };
+  }, [keamananList, santriList]);
+
+  // 6. Top Violators Real strictly from keamananList (No dummy fake data)
+  const topViolators = useMemo(() => {
+    if (!keamananList || keamananList.length === 0) return [];
+    const map = new Map<string, { nama: string; poin: number; count: number }>();
+    keamananList.forEach(k => {
+      const existing = map.get(k.namaSantri) || { nama: k.namaSantri, poin: 0, count: 0 };
+      existing.poin += k.poin || 0;
+      existing.count += 1;
+      map.set(k.namaSantri, existing);
+    });
+    return Array.from(map.values())
+      .sort((a, b) => b.poin - a.poin)
+      .slice(0, 10);
+  }, [keamananList]);
+
+  // Handle task actions
+  const toggleTaskStatus = (id: string) => {
+    setTasks(prev => prev.map(t => {
+      if (t.id === id) {
+        return {
+          ...t,
+          status: t.status === 'done' ? 'pending' : 'done'
+        };
+      }
+      return t;
+    }));
   };
 
-  const occupiedPutraBeds = activePutra.filter(s => 
-    s.statusDomisili !== 'Kampung' && 
-    isValidRoomName(s.kamar)
-  ).length;
-  const occupancyPutraRate = totalPutraBedsCapacity > 0 ? (occupiedPutraBeds / totalPutraBedsCapacity) * 100 : 0;
-
-  // Kamar Putri Terisi (Dynamic based on active Putri)
-  const putriRooms = kamarList.filter(k => {
-    const komp = kompleksList.find(c => c.id === k.kompleksId);
-    return komp && komp.gender === 'Putri';
-  });
-  const totalPutriBedsCapacity = putriRooms.reduce((sum, r) => sum + (r.kapasitas || 0), 0);
-  const occupiedPutriBeds = activePutri.filter(s => 
-    s.statusDomisili !== 'Kampung' && 
-    isValidRoomName(s.kamar)
-  ).length;
-  const occupancyPutriRate = totalPutriBedsCapacity > 0 ? (occupiedPutriBeds / totalPutriBedsCapacity) * 100 : 0;
-
-  // 3. Distribusi Santri Donut Chart calculations
-  const putraCount = santriList.filter(s => s.gender === 'Putra').length;
-  const putriCount = santriList.filter(s => s.gender === 'Putri').length;
-  const totalDistributionCount = putraCount + putriCount;
-
-  // Pie chart calculation (SVG stroke dasharray)
-  const radius = 40;
-  const circumference = 2 * Math.PI * radius; // 251.327
-
-  const putraDash = totalDistributionCount > 0 ? (putraCount / totalDistributionCount) * circumference : 0;
-  const putriDash = totalDistributionCount > 0 ? (putriCount / totalDistributionCount) * circumference : 0;
-
-  // Cumulative offsets (negative values for clockwise/counterclockwise SVG segment rendering)
-  const putraOffset = 0;
-  const putriOffset = -putraDash;
-
-  // Dynamic Recent Activities Builder
-  const getRelativeTimeStr = (dateStr?: string) => {
-    if (!dateStr) return 'Baru saja';
-    const todayRef = new Date();
-    const target = new Date(dateStr);
-    
-    const todayRefDay = new Date(todayRef.getFullYear(), todayRef.getMonth(), todayRef.getDate());
-    const targetDay = new Date(target.getFullYear(), target.getMonth(), target.getDate());
-    
-    const diffTime = todayRefDay.getTime() - targetDay.getTime();
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (diffDays <= 0) {
-      return 'Hari ini';
-    } else if (diffDays === 1) {
-      return 'Kemarin';
-    } else {
-      return `${diffDays} hari lalu`;
-    }
+  const deleteTask = (id: string) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
   };
 
-  const activities: {
-    id: string;
-    type: 'registrasi' | 'surat' | 'pelanggaran' | 'keuangan';
-    title: string;
-    desc: string;
-    timeStr: string;
-    timestamp: number;
-  }[] = [];
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTaskInput.trim()) return;
+    const newTask: TaskItem = {
+      id: Date.now().toString(),
+      text: newTaskInput.trim(),
+      status: 'pending',
+      deadline: '1h 00j 00m',
+      color: tasks.length % 2 === 0 ? 'yellow' : 'blue'
+    };
+    setTasks(prev => [...prev, newTask]);
+    setNewTaskInput('');
+    setIsAddingTask(false);
+  };
 
-  // 1. Registrasi Santri Baru
-  santriList.forEach(s => {
-    if (s.tanggalMasuk) {
-      activities.push({
-        id: `reg-${s.id}`,
-        type: 'registrasi',
-        title: 'Registrasi Santri Baru',
-        desc: `${s.nama} (${s.gender}) - Kamar: ${s.kamar || 'Belum diatur'}`,
-        timeStr: getRelativeTimeStr(s.tanggalMasuk),
-        timestamp: new Date(s.tanggalMasuk).getTime()
-      });
-    }
-  });
-
-  // 3. Laporan Pelanggaran
-  keamananList.forEach(k => {
-    activities.push({
-      id: `keamanan-${k.id}`,
-      type: 'pelanggaran',
-      title: 'Laporan Pelanggaran',
-      desc: `${k.namaSantri} - ${k.jenisPelanggaran} (${k.poin} Poin)`,
-      timeStr: getRelativeTimeStr(k.tanggal),
-      timestamp: new Date(k.tanggal).getTime()
-    });
-  });
-
-  // 4. Pembayaran Syahriah (Keuangan)
-  bendaharaList.filter(b => b.status === 'Lunas').forEach(b => {
-    const payDate = b.tanggalBayar || '2026-06-30';
-    activities.push({
-      id: `spp-${b.id}`,
-      type: 'keuangan',
-      title: 'Pembayaran Syahriah',
-      desc: `${b.namaSantri} - SPP ${b.bulan} (${b.nominal.toLocaleString('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 })})`,
-      timeStr: getRelativeTimeStr(payDate),
-      timestamp: new Date(payDate).getTime()
-    });
-  });
-
-  // Sort and select top 6 recent activities
-  const recentActivities = activities
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, 6);
+  // Filter tasks by search query if typed
+  const filteredTasks = tasks.filter(t => 
+    t.text.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 15 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -15 }}
-      transition={{ duration: 0.3 }}
-      className="space-y-6 px-3 md:px-8 py-4 max-w-7xl mx-auto font-sans"
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ duration: 0.25 }}
+      className="min-h-screen bg-[#E6F4F1] p-3 md:p-6 font-sans text-slate-800 space-y-4 max-w-[1600px] mx-auto"
     >
-      {/* Mobile-First Header Info Section */}
-      <div className="flex flex-col space-y-1.5 pb-4 border-b border-slate-100">
-        <h1 className="text-xl md:text-2xl font-bold text-slate-950 tracking-tight">
-          {getGreeting()}, Admin
-        </h1>
-        <div className="flex items-center justify-between w-full">
-          <p className="text-xs md:text-sm text-slate-500 font-medium">
-            {formattedDate}
-          </p>
-          <div className="flex items-center gap-1.5 text-emerald-600 text-xs font-bold bg-emerald-50/50 px-2.5 py-1 rounded-full border border-emerald-100/30">
-            <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '6s' }} />
-            <span>Data sinkron</span>
-          </div>
-        </div>
-      </div>
-
-      {/* PWA Install Banner */}
+      {/* PWA Banner if applicable */}
       {showPwaBanner && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-900 text-white p-5 md:p-6 shadow-xl border border-emerald-600/30"
+          className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-900 text-white p-4 shadow-md border border-emerald-600/30"
         >
-          {/* Background decoration */}
-          <div className="absolute right-0 bottom-0 opacity-10 transform translate-x-12 translate-y-12 select-none pointer-events-none">
-            <Smartphone className="h-64 w-64 rotate-12" />
-          </div>
-
           <div className="flex items-start justify-between gap-4 relative z-10">
-            <div className="flex flex-col md:flex-row items-start gap-4">
-              <div className="h-12 w-12 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 text-yellow-300 shrink-0">
-                <Smartphone className="h-6 w-6 animate-bounce" style={{ animationDuration: '3s' }} />
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 text-yellow-300 shrink-0">
+                <Smartphone className="h-5 w-5 animate-bounce" style={{ animationDuration: '3s' }} />
               </div>
-              
-              <div className="space-y-1.5 max-w-2xl">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="bg-yellow-400 text-emerald-950 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full tracking-wider shadow-xs">
-                    Rekomendasi
-                  </span>
-                  <h3 className="font-display font-black text-white text-base md:text-lg">
-                    Instal Go AttarOkey di HP / Desktop
-                  </h3>
-                </div>
-                <p className="text-xs md:text-sm text-emerald-100/90 leading-relaxed">
+              <div>
+                <h3 className="font-bold text-white text-sm">Instal Go AttarOkey di HP / Desktop</h3>
+                <p className="text-xs text-emerald-100/90">
                   {isIOS 
-                    ? "Gunakan portal ini lebih cepat, stabil, dan lancar langsung dari layar utama perangkat Apple Anda tanpa harus membuka browser Safari lagi." 
-                    : "Simpan aplikasi manajemen pesantren ini ke beranda atau desktop untuk akses instan satu ketukan, kinerja super lancar, dan dukungan mode offline."}
+                    ? "Gunakan portal ini lebih cepat dan lancar dari layar utama perangkat Apple Anda." 
+                    : "Simpan aplikasi ini ke beranda untuk akses instan dan kinerja lebih lancar."}
                 </p>
-
-                {isIOS && (
-                  <div className="mt-3 bg-white/5 backdrop-blur-xs rounded-xl p-3 border border-white/10 text-xs text-emerald-100 flex items-center gap-2.5">
-                    <Share2 className="h-4 w-4 text-yellow-300 shrink-0" />
-                    <span>
-                      Ketuk tombol <strong>Share/Bagikan</strong> di bagian bawah Safari, lalu pilih opsi <strong>Tambahkan ke Layar Utama (Add to Home Screen)</strong>.
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
-
             <button
               onClick={handleDismissPwaBanner}
-              className="text-white/70 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-full transition-all shrink-0 active:scale-95 cursor-pointer"
-              aria-label="Tutup"
+              className="text-white/70 hover:text-white bg-white/5 hover:bg-white/10 p-1 rounded-full transition-all shrink-0 cursor-pointer"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
-
           {!isIOS && installPrompt && (
-            <div className="mt-4 flex flex-wrap gap-2.5 relative z-10 justify-end md:justify-start pl-0 md:pl-16">
+            <div className="mt-3 flex gap-2 justify-end">
               <button
                 onClick={handleInstallClick}
-                className="inline-flex items-center gap-2 bg-yellow-400 hover:bg-yellow-300 active:scale-95 text-emerald-950 font-bold px-5 py-2.5 rounded-2xl text-xs md:text-sm shadow-md transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 bg-yellow-400 hover:bg-yellow-300 text-emerald-950 font-bold px-4 py-1.5 rounded-xl text-xs shadow-xs transition-all cursor-pointer"
               >
-                <Download className="h-4 w-4" />
-                Instal Aplikasi
-              </button>
-              <button
-                onClick={handleDismissPwaBanner}
-                className="bg-white/10 hover:bg-white/15 active:scale-95 text-white font-medium px-4 py-2.5 rounded-2xl text-xs md:text-sm transition-all border border-white/10 cursor-pointer"
-              >
-                Nanti Saja
+                <Download className="h-3.5 w-3.5" />
+                Instal
               </button>
             </div>
           )}
         </motion.div>
       )}
 
-      {/* 2x2 grid on mobile, 4-cols on desktop */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-6">
-        {/* Card 1: Total Santri */}
-        <div id="stat-total-santri" className="p-4 md:p-6 rounded-2xl bg-slate-50 border border-slate-200/90 hover:bg-slate-100/50 transition-all hover:shadow-xs flex flex-col">
-          <p className="text-[10px] md:text-xs font-bold text-slate-400 tracking-wider uppercase">TOTAL SANTRI</p>
-          <div className="flex items-baseline gap-1 mt-2.5">
-            <span className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">
-              {totalSantriReal.toLocaleString('id-ID')}
-            </span>
-            <span className={`text-[10px] md:text-xs font-bold ${percentChangeStr.startsWith('-') ? 'text-rose-500' : 'text-emerald-500'}`}>
-              {percentChangeStr}
-            </span>
-          </div>
-        </div>
+      {/* Main Grid Layout: Left Main Area & Right Sidebar */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        
+        {/* LEFT / MAIN COLUMN (8 COLS ON LG / 9 COLS ON XL) */}
+        <div className="lg:col-span-8 xl:col-span-9 space-y-4">
 
-        {/* Card 2: Kompleks Asrama */}
-        <div id="stat-kompleks-asrama" className="p-4 md:p-6 rounded-2xl bg-slate-50 border border-slate-200/90 hover:bg-slate-100/50 transition-all hover:shadow-xs flex flex-col">
-          <p className="text-[10px] md:text-xs font-bold text-slate-400 tracking-wider uppercase">KOMPLEKS ASRAMA</p>
-          <div className="flex items-baseline gap-3 mt-2.5">
-            <span className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">
-              {totalAsramaAccum}
-            </span>
-            <div className="flex flex-col text-[10px] text-slate-500 font-semibold leading-tight border-l border-slate-200 pl-2.5">
-              <span>{putraComplexesCount} Putra</span>
-              <span>{putriComplexesCount} Putri</span>
+          {/* 1. Hero Welcome Banner */}
+          <div className="bg-[#0D8A68] rounded-2xl p-5 text-white shadow-xs relative overflow-hidden flex flex-col justify-between min-h-[140px]">
+            {/* Background subtle pattern decorative circle */}
+            <div className="absolute -right-12 -bottom-12 w-48 h-48 bg-white/5 rounded-full pointer-events-none" />
+
+            <div>
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+                Sugeng Rawuh, <span className="font-serif italic font-normal text-emerald-200">David</span>
+              </h1>
+              <p className="text-xs md:text-sm text-emerald-100/90 italic mt-1.5 font-medium max-w-2xl">
+                "Ojo pengen dadi pemimpin, tapi nek dikon mimpin kudu amanah" ~Syaikhina Minanurrochman
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <button 
+                onClick={() => onChangeModule('sekretaris', 'santri')}
+                className="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 text-white text-xs md:text-sm font-semibold px-4 py-2 rounded-full border border-white/25 transition-all cursor-pointer backdrop-blur-xs shadow-3xs"
+              >
+                <span className="w-5 h-5 rounded-full bg-white text-[#0D8A68] flex items-center justify-center font-bold text-xs shrink-0">→</span>
+                <span>Mulai Jelajahi Data</span>
+              </button>
             </div>
           </div>
+
+          {/* 2. Aktifitas Terbaru Ticker Bar (REAL DATA) */}
+          <div className="bg-white rounded-full p-1.5 px-3 border border-emerald-100 shadow-3xs flex items-center justify-between text-xs font-semibold gap-2">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <span className="bg-[#0D8A68] text-white text-[11px] font-bold px-3 py-1 rounded-full shrink-0 shadow-3xs">
+                Aktifitas Terbaru
+              </span>
+              <span className="text-rose-500 font-bold shrink-0 text-[11px] md:text-xs">
+                ({latestActivity.time})
+              </span>
+              <span className="text-slate-600 truncate text-[11px] md:text-xs font-medium">
+                {latestActivity.text}
+              </span>
+            </div>
+            <div className="flex items-center gap-0.5 text-slate-400 shrink-0">
+              <button className="p-1 hover:text-slate-600 cursor-pointer">
+                <ChevronUp className="w-3.5 h-3.5" />
+              </button>
+              <button className="p-1 hover:text-slate-600 cursor-pointer">
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* 3. Top Row Grid: Data Statistik Santri + Status Domisili + Donut Kamar Putra & Putri */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5">
+            
+            {/* Card A: Data Statistik Santri (5 Cols) - REAL DATA */}
+            <div className="md:col-span-5 bg-white rounded-2xl border border-emerald-100/80 shadow-3xs overflow-hidden flex flex-col justify-between">
+              {/* Header Pill */}
+              <div className="bg-[#0D8A68] text-white text-center text-xs font-extrabold py-2.5 tracking-wide">
+                Data Statistik Santri
+              </div>
+
+              {/* Body Content */}
+              <div className="p-4 flex flex-col items-center justify-center space-y-4 flex-1">
+                {/* Double Ring SVG Donut Chart */}
+                <div className="relative w-36 h-36 flex items-center justify-center my-1">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                    {/* Outer Ring: Pink (Putri) */}
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      stroke="#FF4B91"
+                      strokeWidth="8"
+                      strokeDasharray={`${totalSantriReal > 0 ? (putriAktif + putriAlumni + putriMeninggal) / totalSantriReal * 251.3 : 0} 251.3`}
+                      strokeLinecap="round"
+                      fill="transparent"
+                    />
+                    {/* Inner Ring: Cyan/Blue (Putra) */}
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="30"
+                      stroke="#00A3FF"
+                      strokeWidth="8"
+                      strokeDasharray={`${totalSantriReal > 0 ? (putraAktif + putraAlumni + putraMeninggal) / totalSantriReal * 188.4 : 0} 188.4`}
+                      strokeLinecap="round"
+                      fill="transparent"
+                    />
+                  </svg>
+                  {/* Center Text */}
+                  <div className="absolute flex flex-col items-center justify-center text-center">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">TOTAL</span>
+                    <span className="text-xl font-black text-slate-900 leading-none my-0.5">
+                      {totalSantriReal}
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-500">Santri</span>
+                  </div>
+                </div>
+
+                {/* Table Breakdown (REAL DATA) */}
+                <div className="w-full text-[11px] font-bold border border-slate-100 rounded-lg overflow-hidden">
+                  <div className="grid grid-cols-4 text-center">
+                    <div className="bg-white p-1 text-slate-400"></div>
+                    <div className="bg-[#3B82F6] text-white p-1">Aktif</div>
+                    <div className="bg-[#93C5FD] text-slate-800 p-1">Alumni</div>
+                    <div className="bg-[#1E40AF] text-white p-1">Meninggal</div>
+                  </div>
+                  {/* Row Putra */}
+                  <div className="grid grid-cols-4 text-center border-t border-slate-100">
+                    <div className="bg-[#0284C7] text-white p-1 flex items-center justify-center">Putra</div>
+                    <div className="bg-[#E0F2FE] text-sky-900 p-1">{putraAktif}</div>
+                    <div className="bg-[#E0F2FE] text-sky-900 p-1">{putraAlumni}</div>
+                    <div className="bg-[#E0F2FE] text-sky-900 p-1">{putraMeninggal}</div>
+                  </div>
+                  {/* Row Putri */}
+                  <div className="grid grid-cols-4 text-center border-t border-slate-100">
+                    <div className="bg-[#EC4899] text-white p-1 flex items-center justify-center">Putri</div>
+                    <div className="bg-[#FCE7F3] text-pink-900 p-1">{putriAktif}</div>
+                    <div className="bg-[#FCE7F3] text-pink-900 p-1">{putriAlumni}</div>
+                    <div className="bg-[#FCE7F3] text-pink-900 p-1">{putriMeninggal}</div>
+                  </div>
+                </div>
+
+                {/* Button Kelola Data */}
+                <button 
+                  onClick={() => onChangeModule('sekretaris', 'santri')}
+                  className="w-full bg-[#0D8A68] hover:bg-[#0B7A5C] text-white font-extrabold text-xs py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-3xs transition-all cursor-pointer"
+                >
+                  <span>Kelola Data</span>
+                  <ArrowUpRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Card B & C & D: Status Domisili + Donut Kamar (7 Cols) - REAL DATA */}
+            <div className="md:col-span-7 space-y-3.5 flex flex-col justify-between">
+              
+              {/* Card B: Status Domisili Santri Aktif */}
+              <div className="bg-white rounded-2xl border border-emerald-100/80 shadow-3xs overflow-hidden">
+                <div className="bg-[#0D8A68] text-white text-center text-xs font-extrabold py-2.5 tracking-wide">
+                  Status Domisili Santri Aktif
+                </div>
+                <div className="p-4 space-y-3 text-xs font-bold">
+                  {/* Row Putra */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-slate-700">Domisili Muqim <span className="text-[#00A3FF]">Putra</span></span>
+                      <span className="font-extrabold text-slate-800">{putraMuqim} <span className="text-slate-400 font-normal">/{putraAktif}</span></span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-5 rounded-full overflow-hidden relative border border-slate-200/60">
+                      <div className="bg-[#00A3FF] h-full rounded-full transition-all duration-500" style={{ width: `${pctPutraMuqim}%` }} />
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-white font-extrabold drop-shadow-xs">{pctPutraMuqim}%</span>
+                    </div>
+                  </div>
+
+                  {/* Row Putri */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-slate-700">Domisili Muqim <span className="text-[#FF4B91]">Putri</span></span>
+                      <span className="font-extrabold text-slate-800">{putriMuqim} <span className="text-slate-400 font-normal">/{putriAktif}</span></span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-5 rounded-full overflow-hidden relative border border-slate-200/60">
+                      <div className="bg-[#FF4B91] h-full rounded-full transition-all duration-500" style={{ width: `${pctPutriMuqim}%` }} />
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-white font-extrabold drop-shadow-xs">{pctPutriMuqim}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid 2 Donut Cards for Kamar Putra & Kamar Putri */}
+              <div className="grid grid-cols-2 gap-3.5 flex-1">
+                
+                {/* Kamar Putra Donut */}
+                <div className="bg-white rounded-2xl border border-emerald-100/80 shadow-3xs p-3 flex flex-col items-center justify-between">
+                  <div className="relative w-28 h-28 flex items-center justify-center my-1">
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r="34"
+                        stroke="#00A3FF"
+                        strokeWidth="12"
+                        strokeDasharray={`${pctPutraKamar * 2.136} 213.6`}
+                        strokeLinecap="round"
+                        fill="transparent"
+                      />
+                    </svg>
+                    <div className="absolute flex flex-col items-center justify-center text-center">
+                      <span className="text-[8px] font-bold text-slate-400 uppercase">Total</span>
+                      <span className="text-xs font-black text-slate-800 leading-tight">{pctPutraKamar}%</span>
+                      <span className="text-[8px] font-bold text-slate-400">Terisi</span>
+                    </div>
+                  </div>
+
+                  {/* Dual Badge Footer */}
+                  <div className="w-full text-[10px] font-bold border border-slate-100 rounded-lg overflow-hidden mt-2">
+                    <div className="grid grid-cols-2 text-center">
+                      <div className="bg-[#00A3FF] text-white p-1">Kamar Terisi</div>
+                      <div className="bg-[#E0F2FE] text-sky-800 p-1">Blm ditempatkan</div>
+                    </div>
+                    <div className="grid grid-cols-2 text-center border-t border-slate-100">
+                      <div className="p-1 bg-sky-50 text-sky-900 font-extrabold">{putraInKamar} <span className="font-normal text-slate-400 text-[9px]">/{putraInKamar + putraBelumKamar}</span></div>
+                      <div className="p-1 bg-slate-50 text-slate-700 font-extrabold">{putraBelumKamar}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Kamar Putri Donut */}
+                <div className="bg-white rounded-2xl border border-emerald-100/80 shadow-3xs p-3 flex flex-col items-center justify-between">
+                  <div className="relative w-28 h-28 flex items-center justify-center my-1">
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r="34"
+                        stroke="#FF4B91"
+                        strokeWidth="12"
+                        strokeDasharray={`${pctPutriKamar * 2.136} 213.6`}
+                        strokeLinecap="round"
+                        fill="transparent"
+                      />
+                    </svg>
+                    <div className="absolute flex flex-col items-center justify-center text-center">
+                      <span className="text-[8px] font-bold text-slate-400 uppercase">Total</span>
+                      <span className="text-xs font-black text-slate-800 leading-tight">{pctPutriKamar}%</span>
+                      <span className="text-[8px] font-bold text-slate-400">Terisi</span>
+                    </div>
+                  </div>
+
+                  {/* Dual Badge Footer */}
+                  <div className="w-full text-[10px] font-bold border border-slate-100 rounded-lg overflow-hidden mt-2">
+                    <div className="grid grid-cols-2 text-center">
+                      <div className="bg-[#FF4B91] text-white p-1">Kamar Terisi</div>
+                      <div className="bg-[#FCE7F3] text-pink-800 p-1">Blm ditempatkan</div>
+                    </div>
+                    <div className="grid grid-cols-2 text-center border-t border-slate-100">
+                      <div className="p-1 bg-pink-50 text-pink-900 font-extrabold">{putriInKamar} <span className="font-normal text-slate-400 text-[9px]">/{putriInKamar + putriBelumKamar}</span></div>
+                      <div className="p-1 bg-slate-50 text-slate-700 font-extrabold">{putriBelumKamar}</div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* 4. Bottom Row Grid: Monitor Emis Terdaftar (REAL DATA) */}
+          <div className="bg-white rounded-2xl border border-emerald-100/80 shadow-3xs overflow-hidden">
+            <div className="bg-[#0D8A68] text-white text-center text-xs font-extrabold py-2.5 tracking-wide">
+              Monitor Emis Terdaftar
+            </div>
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-bold">
+              {/* Row 1 */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-slate-700">Santri Aktif <span className="text-[#0D8A68]">Putra</span></span>
+                  <span className="font-extrabold text-slate-800">{putraAktifEmis} <span className="text-slate-400 font-normal">/{putraAktif}</span></span>
+                </div>
+                <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden relative">
+                  <div className="bg-[#0D8A68] h-full rounded-full transition-all duration-500" style={{ width: `${pctPutraAktifEmis}%` }} />
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-white font-bold">{pctPutraAktifEmis}%</span>
+                </div>
+              </div>
+
+              {/* Row 2 */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-slate-700">Santri Alumni <span className="text-[#0D8A68]">Putra</span></span>
+                  <span className="font-extrabold text-slate-800">{putraAlumniEmis} <span className="text-slate-400 font-normal">/{putraAlumni}</span></span>
+                </div>
+                <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden relative">
+                  <div className="bg-[#0D8A68] h-full rounded-full transition-all duration-500" style={{ width: `${pctPutraAlumniEmis}%` }} />
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-white font-bold">{pctPutraAlumniEmis}%</span>
+                </div>
+              </div>
+
+              {/* Row 3 */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-slate-700">Santri Aktif <span className="text-[#3B82F6]">Putri</span></span>
+                  <span className="font-extrabold text-slate-800">{putriAktifEmis} <span className="text-slate-400 font-normal">/{putriAktif}</span></span>
+                </div>
+                <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden relative">
+                  <div className="bg-[#3B82F6] h-full rounded-full transition-all duration-500" style={{ width: `${pctPutriAktifEmis}%` }} />
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-white font-bold">{pctPutriAktifEmis}%</span>
+                </div>
+              </div>
+
+              {/* Row 4 */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-slate-700">Santri Alumni <span className="text-[#3B82F6]">Putri</span></span>
+                  <span className="font-extrabold text-slate-800">{putriAlumniEmis} <span className="text-slate-400 font-normal">/{putriAlumni}</span></span>
+                </div>
+                <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden relative">
+                  <div className="bg-[#3B82F6] h-full rounded-full transition-all duration-500" style={{ width: `${pctPutriAlumniEmis}%` }} />
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-white font-bold">{pctPutriAlumniEmis}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        {/* Card 3: Kamar Putra Terisi */}
-        <div id="stat-kamar-putra-terisi" className="p-4 md:p-6 rounded-2xl bg-slate-50 border border-slate-200/90 hover:bg-slate-100/50 transition-all hover:shadow-xs flex flex-col">
-          <p className="text-[10px] md:text-xs font-bold text-slate-400 tracking-wider uppercase">KAMAR PUTRA TERISI</p>
-          <div className="flex items-baseline gap-1 mt-2.5">
-            <span className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">
-              {occupiedPutraBeds}
-            </span>
-            <span className="text-xs md:text-sm font-semibold text-slate-400 tracking-tight">
-              / {totalPutraBedsCapacity}
-            </span>
+        {/* RIGHT SIDEBAR COLUMN (4 COLS ON LG / 3 COLS ON XL) */}
+        <div className="lg:col-span-4 xl:col-span-3 space-y-4">
+          
+          {/* Top Search Input Bar */}
+          <div className="bg-white rounded-2xl p-2 px-4 border border-emerald-100 shadow-3xs flex items-center gap-2">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <input 
+              type="text"
+              placeholder="Cari"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full text-xs font-bold text-slate-800 placeholder-slate-400 bg-transparent focus:outline-none"
+            />
           </div>
-          <div className="w-full bg-slate-200 h-1.5 rounded-full mt-3 overflow-hidden">
-            <div className="bg-indigo-600 h-full rounded-full" style={{ width: `${occupancyPutraRate}%` }} />
-          </div>
-        </div>
 
-        {/* Card 4: Kamar Putri Terisi */}
-        <div id="stat-kamar-putri-terisi" className="p-4 md:p-6 rounded-2xl bg-slate-50 border border-slate-200/90 hover:bg-slate-100/50 transition-all hover:shadow-xs flex flex-col">
-          <p className="text-[10px] md:text-xs font-bold text-slate-400 tracking-wider uppercase">KAMAR PUTRI TERISI</p>
-          <div className="flex items-baseline gap-1 mt-2.5">
-            <span className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">
-              {occupiedPutriBeds}
-            </span>
-            <span className="text-xs md:text-sm font-semibold text-slate-400 tracking-tight">
-              / {totalPutriBedsCapacity}
-            </span>
-          </div>
-          <div className="w-full bg-slate-200 h-1.5 rounded-full mt-3 overflow-hidden">
-            <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${occupancyPutriRate}%` }} />
-          </div>
-        </div>
-      </div>
-
-
-
-      {/* Two Column Layout: Distribusi Santri & Aktivitas Terbaru */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Column 1: Distribusi Santri (Donut Chart) */}
-        <div className="lg:col-span-5 p-5 rounded-2xl border border-slate-100/60 bg-white shadow-xs flex flex-col justify-between lg:h-[380px]">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-slate-800 text-sm">Distribusi Santri</h3>
-              <button className="h-8 w-8 inline-flex items-center justify-center rounded-lg hover:bg-slate-50 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer">
-                <MoreVertical className="h-4 w-4" />
+          {/* Tugas Saya Section (NO FAKE DATA) */}
+          <div className="bg-white rounded-2xl p-4 border border-emerald-100 shadow-3xs space-y-3">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+              <h3 className="font-extrabold text-slate-800 text-sm">Tugas Saya</h3>
+              <button 
+                onClick={() => setIsAddingTask(!isAddingTask)}
+                className="w-6 h-6 rounded-full bg-slate-100 hover:bg-emerald-100 hover:text-emerald-700 flex items-center justify-center text-slate-600 transition-colors cursor-pointer font-bold"
+                title="Tambah Tugas Baru"
+              >
+                <Plus className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Elegant SVG Donut Chart */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-2">
-              <div className="relative h-32 w-32 flex items-center justify-center">
-                <svg className="h-full w-full transform -rotate-90" viewBox="0 0 100 100">
-                  {/* Putri (emerald color) */}
-                  {putriDash > 0 && (
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r={radius}
-                      className="text-emerald-500"
-                      strokeWidth="10"
-                      strokeDasharray={`${putriDash} ${circumference}`}
-                      strokeDashoffset={putriOffset}
-                      stroke="currentColor"
-                      fill="transparent"
-                    />
-                  )}
-                  {/* Putra (violet color) */}
-                  {putraDash > 0 && (
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r={radius}
-                      className="text-violet-600"
-                      strokeWidth="10"
-                      strokeDasharray={`${putraDash} ${circumference}`}
-                      strokeDashoffset={putraOffset}
-                      strokeLinecap="round"
-                      stroke="currentColor"
-                      fill="transparent"
-                    />
-                  )}
-                </svg>
-                {/* Inner Label */}
-                <div className="absolute flex flex-col items-center justify-center text-center">
-                  <span className="text-xl font-black text-slate-800 tracking-tight">
-                    {totalSantriReal}
-                  </span>
-                  <span className="text-[8px] font-bold text-slate-400 tracking-wider uppercase">
-                    TOTAL
-                  </span>
+            {/* Quick Add Form */}
+            {isAddingTask && (
+              <form onSubmit={handleAddTask} className="flex flex-col gap-2 p-2 bg-slate-50 rounded-xl border border-slate-200">
+                <input 
+                  type="text"
+                  placeholder="Deskripsi tugas baru..."
+                  value={newTaskInput}
+                  onChange={(e) => setNewTaskInput(e.target.value)}
+                  className="text-xs p-2 rounded-lg bg-white border border-slate-200 font-medium focus:outline-none focus:border-emerald-500"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-1.5">
+                  <button 
+                    type="button" 
+                    onClick={() => setIsAddingTask(false)}
+                    className="px-2.5 py-1 text-[11px] font-bold text-slate-500 hover:bg-slate-200 rounded-lg cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button 
+                    type="submit"
+                    className="px-3 py-1 text-[11px] font-bold bg-[#0D8A68] text-white rounded-lg cursor-pointer"
+                  >
+                    Simpan
+                  </button>
                 </div>
-              </div>
+              </form>
+            )}
 
-              {/* Legends */}
-              <div className="space-y-3">
-                <div className="flex items-start gap-2.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-violet-600 mt-1 shrink-0" />
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">Putra: {putraCount} Santri</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 mt-1 shrink-0" />
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">Putri: {putriCount} Santri</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Underneath Button: Selengkapnya */}
-          <div className="mt-5 pt-4 border-t border-slate-100 flex justify-end">
-            <button 
-              onClick={() => onChangeModule('sekretaris', 'santri')}
-              className="w-full px-4 py-2 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50/50 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer text-center"
-            >
-              Selengkapnya &rarr;
-            </button>
-          </div>
-        </div>
-
-        {/* Column 2: Aktivitas Terbaru */}
-        <div className="lg:col-span-7 p-5 rounded-2xl border border-slate-100/60 bg-white shadow-xs flex flex-col justify-between lg:h-[380px]">
-          <div className="flex flex-col h-full overflow-hidden w-full">
-            <div className="flex items-center justify-between mb-4 shrink-0">
-              <h3 className="font-bold text-slate-800 text-sm">Aktivitas Terbaru</h3>
-              <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">Real-time</span>
-            </div>
-
-            {/* Timeline List with separators - Scrollable */}
-            <div className="divide-y divide-slate-100 overflow-y-auto pr-1 flex-1">
-              {recentActivities.map((act) => {
-                let icon = <UserPlus className="h-5 w-5" />;
-                let colorClasses = "bg-violet-100 text-violet-600";
-                
-                if (act.type === 'pelanggaran') {
-                  icon = <ShieldAlert className="h-5 w-5" />;
-                  colorClasses = "bg-rose-100 text-rose-600";
-                } else if (act.type === 'keuangan') {
-                  icon = <Wallet className="h-5 w-5" />;
-                  colorClasses = "bg-emerald-100 text-emerald-600";
+            {/* Task Items List */}
+            <div className="space-y-2.5">
+              {filteredTasks.map((task) => {
+                const isDone = task.status === 'done';
+                let cardBg = 'bg-slate-50 border-slate-100';
+                if (isDone) {
+                  cardBg = 'bg-[#EAFBF3] border-emerald-200/60';
+                } else if (task.color === 'yellow') {
+                  cardBg = 'bg-[#FFFBEB] border-amber-200/60';
+                } else if (task.color === 'blue') {
+                  cardBg = 'bg-[#F0F9FF] border-sky-200/60';
                 }
 
                 return (
-                  <div key={act.id} className="flex gap-3.5 py-3 first:pt-1 last:pb-1">
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${colorClasses}`}>
-                      {icon}
+                  <div 
+                    key={task.id}
+                    className={`p-3 rounded-2xl border ${cardBg} shadow-2xs space-y-2 transition-all`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      {/* Checkbox */}
+                      <button
+                        onClick={() => toggleTaskStatus(task.id)}
+                        className={`w-5 h-5 rounded-md border mt-0.5 flex items-center justify-center shrink-0 cursor-pointer transition-colors ${
+                          isDone 
+                            ? 'bg-emerald-500 border-emerald-500 text-white' 
+                            : 'bg-white border-slate-300 hover:border-emerald-500'
+                        }`}
+                      >
+                        {isDone && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      </button>
+
+                      {/* Task Text */}
+                      <p className={`text-xs font-medium leading-relaxed flex-1 ${
+                        isDone ? 'line-through text-slate-500' : 'text-slate-800 font-semibold'
+                      }`}>
+                        {task.text}
+                      </p>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-slate-800 truncate">
-                        {act.title}
-                      </p>
-                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                        {act.desc}
-                      </p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">{act.timeStr}</p>
+
+                    {/* Bottom Status / Deadline & Delete */}
+                    <div className="flex items-center justify-between pt-1 pl-7">
+                      {isDone ? (
+                        <span className="bg-[#22C55E] text-white text-[10px] font-extrabold px-3 py-1 rounded-full shadow-3xs">
+                          Terselesaikan
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
+                          <span>Deadline</span>
+                          <span className="text-rose-500 font-extrabold">{task.deadline || '1h 00j 00m'}</span>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => deleteTask(task.id)}
+                        className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        title="Hapus Tugas"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 );
               })}
 
-              {recentActivities.length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-8">Belum ada aktivitas terbaru.</p>
+              {filteredTasks.length === 0 && (
+                <div className="text-center py-6 px-2 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                  <ListTodo className="w-8 h-8 text-slate-300 mx-auto mb-1.5" />
+                  <p className="text-xs font-semibold text-slate-500">Belum ada tugas</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Klik + untuk menambah tugas baru</p>
+                </div>
               )}
             </div>
           </div>
+
         </div>
+
+      </div>
+
+      {/* FULL WIDTH CARD FOR TOP 10 PELANGGARAN (EXPANDED ALL THE WAY TO RIGHT SCREEN EDGE) */}
+      <div className="w-full bg-[#0D8A68] rounded-2xl p-4 md:p-5 text-white shadow-3xs border border-emerald-700/50">
+        
+        {/* Top Pills Header */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <button className="bg-[#4ADE80] text-slate-950 font-black text-xs px-4 py-1.5 rounded-full shadow-3xs cursor-pointer">
+              Top 10 Pelanggaran
+            </button>
+            <span className="text-xs text-emerald-100 font-medium hidden sm:inline">
+              Data akumulasi dari modul Keamanan Santri
+            </span>
+          </div>
+
+          <button 
+            onClick={() => onChangeModule('keamanan')}
+            className="inline-flex items-center gap-1.5 bg-[#0B7A5C] hover:bg-[#096B50] text-white font-bold text-xs px-4 py-1.5 rounded-full transition-colors cursor-pointer border border-emerald-400/20"
+          >
+            <span>Buka Modul Keamanan</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* List items 1 - 10 (FULL-WIDTH RESPONSIVE GRID) */}
+        {topViolators.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+            {topViolators.map((item, idx) => {
+              const rankNum = idx + 1;
+              return (
+                <div 
+                  key={idx}
+                  onClick={() => onChangeModule('keamanan')}
+                  className="bg-[#10B981]/30 hover:bg-[#10B981]/50 border border-emerald-400/20 rounded-xl p-3 flex flex-col justify-between cursor-pointer transition-all text-xs font-bold gap-2 group shadow-2xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-full bg-white text-slate-900 font-extrabold flex items-center justify-center text-xs shrink-0 shadow-2xs">
+                        {rankNum}
+                      </span>
+                      <span className="text-white font-extrabold text-sm truncate group-hover:text-yellow-300 transition-colors">
+                        {item.nama}
+                      </span>
+                    </div>
+                    <ArrowUpRight className="w-4 h-4 text-emerald-200 shrink-0 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-emerald-400/20 text-[11px]">
+                    <span className="text-emerald-200 font-bold">{item.poin} <span className="font-normal text-emerald-300/80 text-[10px]">Poin</span></span>
+                    <span className="text-emerald-100 font-bold italic">{item.count}x <span className="font-normal text-emerald-300/80 text-[10px] not-italic">Pelanggaran</span></span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-8 px-4 bg-emerald-900/30 rounded-xl border border-dashed border-emerald-500/30">
+            <CheckCircle2 className="w-9 h-9 text-emerald-300/60 mx-auto mb-2" />
+            <p className="text-sm font-bold text-emerald-100">Belum ada data pelanggaran tercatat</p>
+            <p className="text-xs text-emerald-200/70 mt-1">
+              Catatan pelanggaran santri dari modul Keamanan akan muncul di sini secara otomatis.
+            </p>
+          </div>
+        )}
+
       </div>
     </motion.div>
   );

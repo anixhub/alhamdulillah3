@@ -74,6 +74,14 @@ export default function KamarSub({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
 
+  // View mode for detail kamar (slots vs table) & Drag and drop
+  const [viewMode, setViewMode] = useState<'slots' | 'table'>('slots');
+  const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
+  const [dragOverTopSlot, setDragOverTopSlot] = useState<number | null>(null);
+  const [quickAssignSlot, setQuickAssignSlot] = useState<number | null>(null);
+  const [targetSlotForAdd, setTargetSlotForAdd] = useState<number | null>(null);
+
   // Selection & Bulk Action
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
@@ -501,36 +509,134 @@ export default function KamarSub({
     setIsKamarModalOpen(false);
   };
 
-  // Auto-numbering for closets in room
-  const handleAutoNumbering = (mode: 'sequential' | 'random' | 'reset') => {
+  // Shuffle/Randomize santri into available closet slots
+  const handleAcakSantri = () => {
     if (!activeRoomForDetail) return;
     const members = getMembersOfRoom(activeRoomForDetail.nama);
-
-    if (mode === 'reset') {
-      members.forEach(s => onUpdateSantriRoom(s.id, activeRoomForDetail.nama, ''));
-      showToast('Nomor lemari semua anggota berhasil direset.');
-    } else if (mode === 'sequential') {
-      members.sort((a, b) => a.nama.localeCompare(b.nama)).forEach((s, idx) => {
-        onUpdateSantriRoom(s.id, activeRoomForDetail.nama, String(idx + 1));
-      });
-      showToast('Nomor lemari berhasil dibuat secara berurutan (1, 2, 3...).');
-    } else if (mode === 'random') {
-      const n = members.length;
-      const nums = Array.from({ length: n }, (_, i) => String(i + 1));
-      for (let i = n - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [nums[i], nums[j]] = [nums[j], nums[i]];
-      }
-      members.forEach((s, idx) => {
-        onUpdateSantriRoom(s.id, activeRoomForDetail.nama, nums[idx]);
-      });
-      showToast('Nomor lemari berhasil diacak.');
+    if (members.length === 0) {
+      showToast('Tidak ada santri di kamar ini untuk diacak.', 'error');
+      return;
     }
-    setIsAutoNumberingDropdownOpen(false);
+    const capacity = activeRoomForDetail.kapasitas || 15;
+
+    // Shuffle members array
+    const shuffledMembers = [...members];
+    for (let i = shuffledMembers.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffledMembers[i], shuffledMembers[j]] = [shuffledMembers[j], shuffledMembers[i]];
+    }
+
+    // Available slots 1..capacity
+    const availableSlots = Array.from({ length: capacity }, (_, i) => i + 1);
+    for (let i = availableSlots.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [availableSlots[i], availableSlots[j]] = [availableSlots[j], availableSlots[i]];
+    }
+
+    // Assign slots: fill empty lockers 1-by-1 first, if > capacity, distribute additional into slots
+    shuffledMembers.forEach((santri, idx) => {
+      let slotAssigned: number;
+      if (idx < capacity) {
+        slotAssigned = availableSlots[idx];
+      } else {
+        slotAssigned = availableSlots[idx % capacity];
+      }
+      onUpdateSantriRoom(santri.id, activeRoomForDetail.nama, String(slotAssigned));
+    });
+
+    showToast(`Pengacakan selesai! ${shuffledMembers.length} santri berhasil ditempatkan di lemari.`);
+  };
+
+  // Drag and drop handlers: SWAP (Drop on row) vs SHIFT (Drop on top line)
+  const handleSlotDropSwap = (targetSlot: number) => {
+    if (!draggedStudentId || !activeRoomForDetail) return;
+    const draggedStudent = santriList.find(s => s.id === draggedStudentId);
+    if (!draggedStudent) return;
+
+    const targetSlotStr = String(targetSlot);
+    const oldSlotStr = draggedStudent.nomorLemari || '';
+    const oldSlotNum = parseInt(oldSlotStr, 10);
+
+    const currentMembers = getMembersOfRoom(activeRoomForDetail.nama);
+    const targetOccupants = currentMembers.filter(s => {
+      const num = parseInt(s.nomorLemari || '0', 10);
+      return num === targetSlot || s.nomorLemari === targetSlotStr;
+    });
+
+    if (targetOccupants.length > 0) {
+      if (targetOccupants.length === 1 && targetOccupants[0].id === draggedStudent.id) {
+        setDraggedStudentId(null);
+        setDragOverSlot(null);
+        setDragOverTopSlot(null);
+        return;
+      }
+
+      // SWAP logic: target occupants get dragged student's old slot
+      targetOccupants.forEach(occ => {
+        if (occ.id !== draggedStudent.id) {
+          onUpdateSantriRoom(occ.id, activeRoomForDetail.nama, oldSlotStr);
+        }
+      });
+      onUpdateSantriRoom(draggedStudent.id, activeRoomForDetail.nama, targetSlotStr);
+
+      const targetNames = targetOccupants.map(o => o.nama).join(', ');
+      const oldSlotDisplay = oldSlotNum > 0 ? `Lemari ${String(oldSlotNum).padStart(2, '0')}` : 'Tanpa Lemari';
+      showToast(`Tukar Lemari: ${draggedStudent.nama} ↔ ${targetNames} (${oldSlotDisplay})`);
+    } else {
+      // Empty slot
+      onUpdateSantriRoom(draggedStudent.id, activeRoomForDetail.nama, targetSlotStr);
+      showToast(`${draggedStudent.nama} dipindahkan ke Lemari ${String(targetSlot).padStart(2, '0')}`);
+    }
+
+    setDraggedStudentId(null);
+    setDragOverSlot(null);
+    setDragOverTopSlot(null);
+  };
+
+  const handleSlotDropShift = (targetSlot: number) => {
+    if (!draggedStudentId || !activeRoomForDetail) return;
+    const draggedStudent = santriList.find(s => s.id === draggedStudentId);
+    if (!draggedStudent) return;
+
+    const currentMembers = getMembersOfRoom(activeRoomForDetail.nama);
+
+    // Filter members in slots >= targetSlot (except dragged student itself)
+    const membersToShift = currentMembers.filter(s => {
+      if (s.id === draggedStudent.id) return false;
+      const num = parseInt(s.nomorLemari || '0', 10);
+      return num >= targetSlot;
+    });
+
+    // Sort descending by current slot number to shift from bottom to top safely
+    membersToShift.sort((a, b) => {
+      const numA = parseInt(a.nomorLemari || '0', 10);
+      const numB = parseInt(b.nomorLemari || '0', 10);
+      return numB - numA;
+    });
+
+    // Shift each student down by 1 slot number
+    membersToShift.forEach(s => {
+      const curNum = parseInt(s.nomorLemari || '0', 10);
+      onUpdateSantriRoom(s.id, activeRoomForDetail.nama, String(curNum + 1));
+    });
+
+    // Put dragged student at targetSlot
+    onUpdateSantriRoom(draggedStudent.id, activeRoomForDetail.nama, String(targetSlot));
+
+    showToast(`${draggedStudent.nama} disisipkan di Lemari ${String(targetSlot).padStart(2, '0')}, lemari berikutnya tergeser.`);
+
+    setDraggedStudentId(null);
+    setDragOverSlot(null);
+    setDragOverTopSlot(null);
   };
 
   // Add Member Modal logic
-  const handleOpenAddMemberModal = () => {
+  const handleOpenAddMemberModal = (slotNum?: number) => {
+    if (typeof slotNum === 'number') {
+      setTargetSlotForAdd(slotNum);
+    } else {
+      setTargetSlotForAdd(null);
+    }
     setSelectedModalStudentIds([]);
     setAddMemberSearch('');
     setAddMemberRoomFilter('BelumKamar');
@@ -569,11 +675,17 @@ export default function KamarSub({
     if (!activeRoomForDetail || selectedModalStudentIds.length === 0) return;
 
     selectedModalStudentIds.forEach(id => {
-      onUpdateSantriRoom(id, activeRoomForDetail.nama);
+      onUpdateSantriRoom(
+        id, 
+        activeRoomForDetail.nama, 
+        targetSlotForAdd ? String(targetSlotForAdd) : undefined
+      );
     });
 
-    showToast(`${selectedModalStudentIds.length} santri berhasil ditambahkan ke ${activeRoomForDetail.nama}.`);
+    const slotMsg = targetSlotForAdd ? ` ke Lemari No. ${String(targetSlotForAdd).padStart(2, '0')}` : '';
+    showToast(`${selectedModalStudentIds.length} santri berhasil ditambahkan ke ${activeRoomForDetail.nama}${slotMsg}.`);
     setSelectedModalStudentIds([]);
+    setTargetSlotForAdd(null);
     setIsAddMemberModalOpen(false);
   };
 
@@ -1340,7 +1452,7 @@ export default function KamarSub({
 
                   {canWriteCurrent && (
                     <button
-                      onClick={handleOpenAddMemberModal}
+                      onClick={() => handleOpenAddMemberModal()}
                       className="p-2.5 rounded-full border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 shadow-2xs transition-all cursor-pointer"
                       title="Tambah Anggota Santri ke Kamar"
                     >
@@ -1387,18 +1499,30 @@ export default function KamarSub({
                 </div>
 
                 {/* Card 2: Kapasitas */}
-                <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-2">
-                  <div className="flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                    <span>KAPASITAS</span>
-                    <span className="text-purple-700 font-extrabold">{currentRoomMembers.length} / {activeRoomForDetail.kapasitas || 15}</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden mt-2">
-                    <div 
-                      className="h-full bg-purple-600 transition-all duration-300"
-                      style={{ width: `${Math.min(100, Math.round((currentRoomMembers.length / (activeRoomForDetail.kapasitas || 15)) * 100))}%` }}
-                    />
-                  </div>
-                </div>
+                {(() => {
+                  const roomCapacity = activeRoomForDetail.kapasitas || 15;
+                  const occupiedSlotsCount = Array.from({ length: roomCapacity }, (_, i) => i + 1).filter(slotNum => 
+                    currentRoomMembers.some(s => parseInt(s.nomorLemari || '0', 10) === slotNum || s.nomorLemari === String(slotNum))
+                  ).length;
+
+                  return (
+                    <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-2">
+                      <div className="flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                        <span>KAPASITAS LEMARI</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-purple-700 font-extrabold">{occupiedSlotsCount} / {roomCapacity} Lemari</span>
+                          <span className="text-slate-500 text-[10px] font-medium">({currentRoomMembers.length} Santri)</span>
+                        </div>
+                      </div>
+                      <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden mt-2">
+                        <div 
+                          className="h-full bg-purple-600 transition-all duration-300"
+                          style={{ width: `${Math.min(100, Math.round((occupiedSlotsCount / roomCapacity) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -1407,57 +1531,16 @@ export default function KamarSub({
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 {/* Search & Action Controls */}
                 <div className="flex flex-wrap items-center gap-2 flex-1">
-                  {/* Dropdown Atur Nomor Lemari (Button with Dropdown) - Most Left */}
+                  {/* Tombol Acak Santri */}
                   {canWriteCurrent && (
-                    <div className="relative shrink-0">
-                      <button
-                        onClick={() => setIsAutoNumberingDropdownOpen(!isAutoNumberingDropdownOpen)}
-                        className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-all cursor-pointer shadow-3xs flex items-center gap-1.5 text-xs font-bold"
-                        title="Atur Nomor Lemari"
-                      >
-                        <Hash className="w-4 h-4 text-purple-600" />
-                        <span>Atur Lemari</span>
-                        <ChevronDown className="w-3 h-3 text-slate-400" />
-                      </button>
-
-                      {isAutoNumberingDropdownOpen && (
-                        <>
-                          <div className="fixed inset-0 z-20" onClick={() => setIsAutoNumberingDropdownOpen(false)} />
-                          <div className="absolute left-0 mt-1 w-44 rounded-2xl border border-slate-100 bg-white shadow-xl py-1.5 z-30 text-xs font-medium animate-fade-in">
-                            <div className="px-3.5 py-1.5 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100">
-                              Atur No. Lemari
-                            </div>
-                            <button
-                              onClick={() => {
-                                setIsAutoNumberingDropdownOpen(false);
-                                handleAutoNumbering('sequential');
-                              }}
-                              className="w-full px-3.5 py-2 text-left hover:bg-slate-50 text-slate-700 font-bold cursor-pointer transition-colors"
-                            >
-                              Terurut
-                            </button>
-                            <button
-                              onClick={() => {
-                                setIsAutoNumberingDropdownOpen(false);
-                                handleAutoNumbering('random');
-                              }}
-                              className="w-full px-3.5 py-2 text-left hover:bg-slate-50 text-slate-700 font-bold cursor-pointer transition-colors"
-                            >
-                              Acak
-                            </button>
-                            <button
-                              onClick={() => {
-                                setIsAutoNumberingDropdownOpen(false);
-                                handleAutoNumbering('reset');
-                              }}
-                              className="w-full px-3.5 py-2 text-left hover:bg-rose-50 text-rose-600 font-bold border-t border-slate-100 cursor-pointer transition-colors"
-                            >
-                              Kosongkan
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
+                    <button
+                      onClick={handleAcakSantri}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-all cursor-pointer shadow-3xs flex items-center gap-1.5 text-xs font-bold shrink-0"
+                      title="Acak Santri ke Lemari Kosong"
+                    >
+                      <Shuffle className="w-4 h-4 text-purple-600" />
+                      <span>Acak Santri</span>
+                    </button>
                   )}
 
                   {/* Search Bar */}
@@ -1490,29 +1573,31 @@ export default function KamarSub({
                   </select>
                 </div>
 
-                    {/* Horizontal Scroll Header Navigation Buttons (shown only when horizontal scroll is active) */}
-                    {(canScrollLeft || canScrollRight) && (
-                      <div className="flex items-center gap-1 shrink-0 bg-slate-100 p-0.5 rounded-xl border border-slate-200">
-                        {canScrollLeft && (
-                          <button
-                            onClick={() => scrollTable('left')}
-                            className="p-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 transition-all cursor-pointer shadow-3xs"
-                            title="Gulir Ke Kiri"
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
-                        )}
-                        {canScrollRight && (
-                          <button
-                            onClick={() => scrollTable('right')}
-                            className="p-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 transition-all cursor-pointer shadow-3xs"
-                            title="Gulir Ke Kanan"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    {/* View Mode Toggle Buttons */}
+                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('slots')}
+                        className={`px-3 py-1.5 text-xs font-extrabold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                          viewMode === 'slots' ? 'bg-white text-purple-700 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                        title="Tampilan Slot Lemari (Drag & Drop)"
+                      >
+                        <BedDouble className="w-3.5 h-3.5" />
+                        <span>Slot Lemari</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('table')}
+                        className={`px-3 py-1.5 text-xs font-extrabold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                          viewMode === 'table' ? 'bg-white text-purple-700 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                        title="Tampilan Tabel List"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                        <span>Tabel List</span>
+                      </button>
+                    </div>
                   </div>
 
               {/* Bulk Action Bar Banner */}
@@ -1562,6 +1647,317 @@ export default function KamarSub({
               )}
             </div>
 
+            {/* DETAIL VIEW CONTENT: SLOTS OR TABLE */}
+            {viewMode === 'slots' ? (
+              /* SLOTS / LEMARI CAPACITY VISUALIZATION (DRAG & DROP) */
+              (() => {
+                const roomCapacity = activeRoomForDetail.kapasitas || 15;
+                const slotNumbers = Array.from({ length: roomCapacity }, (_, i) => i + 1);
+
+                // Members who are in this room but don't have a valid locker number within capacity range
+                const unassignedMembers = currentRoomMembers.filter(s => {
+                  const num = parseInt(s.nomorLemari || '0', 10);
+                  return isNaN(num) || num < 1 || num > roomCapacity;
+                });
+
+                return (
+                  <div className="space-y-4">
+                    {/* Unassigned Students Bar if any */}
+                    {unassignedMembers.length > 0 && (
+                      <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200/80 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-extrabold text-amber-900 flex items-center gap-1.5">
+                            <AlertCircle className="w-4 h-4 text-amber-600" />
+                            Santri Belum Ada No. Lemari ({unassignedMembers.length})
+                          </span>
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                            Tarik ke slot lemari di bawah
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {unassignedMembers.map(s => (
+                            <div
+                              key={s.id}
+                              draggable={canWriteCurrent}
+                              onDragStart={(e) => {
+                                setDraggedStudentId(s.id);
+                                e.dataTransfer.setData('text/plain', s.id);
+                              }}
+                              className="px-3 py-1.5 bg-white border border-amber-300/80 hover:border-purple-500 rounded-xl shadow-2xs text-xs font-bold text-slate-800 flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-purple-50 transition-all"
+                            >
+                              {renderSantriAvatar(s, "w-6 h-6 rounded-full border border-slate-200 text-[10px]")}
+                              <span>{s.nama}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Slot Table - Columns EXACT SAME as Tabel List */}
+                    <div className="relative rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500 font-extrabold select-none">
+                              <th className="py-3 px-3.5 w-12 text-center">No</th>
+                              <th className="py-3 px-3.5 w-28 text-center">No. Lemari</th>
+                              <th className="py-3 px-3.5 min-w-[200px]">Nama Santri</th>
+                              <th className="py-3 px-3.5 w-28">NIS</th>
+                              <th className="py-3 px-3.5 w-48">Alamat</th>
+                              <th className="py-3 px-3.5 w-20 text-center sticky right-0 bg-slate-100/95 backdrop-blur-xs z-10 border-l border-slate-200/60 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.05)]">
+                                Aksi
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
+                            {(() => {
+                              let runningSantriCount = 0;
+
+                              return slotNumbers.map(slotNum => {
+                                const slotStr = String(slotNum);
+                                const occupants = currentRoomMembers.filter(s => {
+                                  const num = parseInt(s.nomorLemari || '0', 10);
+                                  return num === slotNum || s.nomorLemari === slotStr;
+                                });
+
+                                const isOver = dragOverSlot === slotNum;
+
+                                return (
+                                  <React.Fragment key={slotNum}>
+                                    {occupants.length === 0 ? (
+                                      /* Empty Slot Row */
+                                      <tr
+                                        onDragOver={(e) => {
+                                          e.preventDefault();
+                                          setDragOverSlot(slotNum);
+                                          setDragOverTopSlot(null);
+                                        }}
+                                        onDragLeave={() => setDragOverSlot(null)}
+                                        onDrop={(e) => {
+                                          e.preventDefault();
+                                          handleSlotDropSwap(slotNum);
+                                        }}
+                                        className={`transition-colors ${
+                                          isOver ? 'bg-purple-100/80' : 'bg-slate-50/20 hover:bg-purple-50/30'
+                                        }`}
+                                      >
+                                        <td className="py-3 px-3.5 text-center font-mono text-slate-300 text-[11px]">
+                                          -
+                                        </td>
+                                        <td className="py-3 px-3.5 text-center">
+                                          <span className="font-mono font-bold text-xs bg-slate-100 text-slate-400 px-2 py-0.5 rounded-md border border-slate-200">
+                                            {String(slotNum).padStart(2, '0')}
+                                          </span>
+                                        </td>
+                                        <td className="py-3 px-3.5">
+                                          <div
+                                            onClick={() => canWriteCurrent && handleOpenAddMemberModal(slotNum)}
+                                            className="flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-purple-600 cursor-pointer transition-colors py-0.5"
+                                          >
+                                            <span className="font-bold text-slate-300 hover:text-purple-500">+ Slot Kosong</span>
+                                            <span className="text-[10px] text-slate-400 hidden sm:inline">(Klik atau tarik santri ke sini)</span>
+                                          </div>
+                                        </td>
+                                        <td className="py-3 px-3.5 font-mono text-slate-300 text-[11px]">-</td>
+                                        <td className="py-3 px-3.5 text-slate-300 text-[11px]">-</td>
+                                        <td className="py-3 px-3.5 text-center sticky right-0 bg-white group-hover:bg-purple-50/20 z-10 border-l border-slate-100 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.03)]">
+                                          {canWriteCurrent && (
+                                            <button
+                                              onClick={() => handleOpenAddMemberModal(slotNum)}
+                                              className="p-1 px-2 rounded-lg bg-slate-100 hover:bg-purple-100 text-slate-600 hover:text-purple-700 text-[10px] font-bold cursor-pointer transition-colors"
+                                              title="Isi Lemari Ini"
+                                            >
+                                              + Isi
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      /* Occupant Row(s) for this Slot */
+                                      occupants.map((s, idx) => {
+                                        runningSantriCount++;
+                                        const currentSantriNo = runningSantriCount;
+
+                                        const isKetua = Boolean(
+                                          activeRoomForDetail.ketuaKamar &&
+                                          activeRoomForDetail.ketuaKamar.trim().toLowerCase() === s.nama.trim().toLowerCase()
+                                        );
+
+                                        return (
+                                          <React.Fragment key={s.id}>
+                                            {/* Top Border Drop Zone for Shift Insertion */}
+                                            {canWriteCurrent && draggedStudentId && (
+                                              <tr
+                                                className="relative"
+                                                onDragOver={(e) => {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  setDragOverTopSlot(slotNum);
+                                                  setDragOverSlot(null);
+                                                }}
+                                                onDragLeave={() => setDragOverTopSlot(null)}
+                                                onDrop={(e) => {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  handleSlotDropShift(slotNum);
+                                                }}
+                                              >
+                                                <td colSpan={6} className="p-0 border-0 h-0 relative">
+                                                  <div className={`absolute top-0 left-0 right-0 z-20 transition-all ${
+                                                    dragOverTopSlot === slotNum
+                                                      ? 'h-4 -translate-y-2 bg-purple-600 shadow-lg flex items-center justify-center text-[10px] text-white font-black uppercase tracking-wider rounded-full'
+                                                      : 'h-1.5 -translate-y-0.5 bg-transparent hover:bg-purple-400/50'
+                                                  }`}>
+                                                    {dragOverTopSlot === slotNum && (
+                                                      <span>Sisipkan &amp; Geser Ke Lemari {String(slotNum).padStart(2, '0')}</span>
+                                                    )}
+                                                  </div>
+                                                </td>
+                                              </tr>
+                                            )}
+
+                                            <tr
+                                              draggable={canWriteCurrent}
+                                              onDragStart={(e) => {
+                                                setDraggedStudentId(s.id);
+                                                e.dataTransfer.setData('text/plain', s.id);
+                                              }}
+                                              onDragEnd={() => {
+                                                setDraggedStudentId(null);
+                                                setDragOverSlot(null);
+                                                setDragOverTopSlot(null);
+                                              }}
+                                              onDragOver={(e) => {
+                                                e.preventDefault();
+                                                setDragOverSlot(slotNum);
+                                                setDragOverTopSlot(null);
+                                              }}
+                                              onDragLeave={() => setDragOverSlot(null)}
+                                              onDrop={(e) => {
+                                                e.preventDefault();
+                                                handleSlotDropSwap(slotNum);
+                                              }}
+                                              className={`transition-colors cursor-grab active:cursor-grabbing group ${
+                                                isOver ? 'bg-purple-100/80 ring-2 ring-purple-400/50 z-10' : idx > 0 ? 'bg-purple-50/20 hover:bg-purple-50/40' : 'hover:bg-purple-50/20'
+                                              }`}
+                                            >
+                                              {/* No - Runtut per Santri */}
+                                              <td className="py-3 px-3.5 text-center font-mono font-bold text-slate-600 text-[11px]">
+                                                {currentSantriNo}
+                                              </td>
+
+                                              {/* No. Lemari - Show badge for primary (idx 0), connect with vertical line for co-occupants (idx > 0) */}
+                                              <td className="py-3 px-3.5 text-center align-middle">
+                                                {idx === 0 ? (
+                                                  <div className="flex flex-col items-center justify-center relative">
+                                                    <span className="font-mono font-bold text-xs px-2 py-0.5 rounded-md border inline-block bg-purple-50 text-purple-700 border-purple-200 shadow-2xs">
+                                                      {String(slotNum).padStart(2, '0')}
+                                                    </span>
+                                                    {occupants.length > 1 && (
+                                                      <div className="w-0.5 bg-purple-300 h-3.5 absolute -bottom-3.5 left-1/2 -translate-x-1/2 z-0" />
+                                                    )}
+                                                  </div>
+                                                ) : (
+                                                  <div className="flex justify-center items-center h-full relative py-1">
+                                                    {/* Vertical trunk line */}
+                                                    <div className={`w-0.5 bg-purple-300 absolute left-1/2 -translate-x-1/2 ${
+                                                      idx === occupants.length - 1 ? '-top-3 h-6' : '-top-3 h-10'
+                                                    }`} />
+                                                    {/* Horizontal branch tick */}
+                                                    <div className="w-2.5 h-0.5 bg-purple-300 absolute left-1/2 top-1/2" />
+                                                  </div>
+                                                )}
+                                              </td>
+
+                                              {/* Nama Santri */}
+                                              <td className="py-3 px-3.5">
+                                                <div
+                                                  onClick={() => setSelectedSantriForDetail(s)}
+                                                  className="flex items-center gap-2.5 cursor-pointer group min-w-0"
+                                                  title="Klik untuk lihat biodata"
+                                                >
+                                                  {renderSantriAvatar(s, "w-8 h-8 rounded-full border border-slate-200 text-xs font-bold shrink-0")}
+                                                  <div className="min-w-0">
+                                                    <div className="flex items-center gap-1.5">
+                                                      <p className="font-extrabold text-slate-800 group-hover:text-purple-600 transition-colors truncate">
+                                                        {s.nama}
+                                                      </p>
+                                                      {isKetua && (
+                                                        <span title="Ketua Kamar" className="shrink-0">
+                                                          <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                                      <span className="inline-block text-[9.5px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                                                        {s.statusDomisili || s.status || 'Muqim'}
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </td>
+
+                                              {/* NIS */}
+                                              <td className="py-3 px-3.5 font-mono text-slate-600 font-bold text-[11px]">
+                                                {s.nis || '-'}
+                                              </td>
+
+                                              {/* Alamat */}
+                                              <td className="py-3 px-3.5 text-slate-500 text-[11px] truncate max-w-[180px]">
+                                                {s.desa ? `Ds. ${s.desa}, Kec. ${s.kecamatan || '-'}` : (s.alamat || s.asal || '-')}
+                                              </td>
+
+                                              {/* Aksi - Sticky Right */}
+                                              <td className="py-3 px-3.5 text-center sticky right-0 bg-white group-hover:bg-purple-50/30 z-10 border-l border-slate-100 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.03)]">
+                                                <div className="flex items-center justify-center">
+                                                  {canWriteCurrent && (
+                                                    <button
+                                                      onClick={e => handleOpenMenu(e, 'santri', s.id, s)}
+                                                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                                                      title="Opsi Santri"
+                                                    >
+                                                      <MoreVertical className="w-4 h-4" />
+                                                    </button>
+                                                  )}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          </React.Fragment>
+                                        );
+                                      })
+                                    )}
+
+                                    {/* Expandable Bottom Border Row on Hover (ONLY for occupied slots & NOT during dragging) */}
+                                    {occupants.length > 0 && !draggedStudentId && (
+                                      <tr className="group/addslot relative">
+                                        <td colSpan={6} className="p-0 border-0">
+                                          <div
+                                            onClick={() => {
+                                              if (canWriteCurrent) {
+                                                handleOpenAddMemberModal(slotNum);
+                                              }
+                                            }}
+                                            className="overflow-hidden transition-all duration-200 ease-out flex items-center justify-center gap-2 border-b cursor-pointer max-h-0 py-0 opacity-0 group-hover/addslot:max-h-12 group-hover/addslot:py-2.5 group-hover/addslot:opacity-100 bg-purple-50/90 text-purple-600 border-dashed border-purple-300 hover:bg-purple-100 text-xs font-bold"
+                                          >
+                                            <UserPlus className="w-3.5 h-3.5" />
+                                            <span>+ Tambah Santri ke Lemari No. {String(slotNum).padStart(2, '0')}</span>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
+            <>
             {/* Responsive Santri Table */}
             <div className="relative rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
               <div 
@@ -1595,7 +1991,9 @@ export default function KamarSub({
                       {renderSortableHeader('Nama Santri', 'nama', 'py-3 px-3.5 min-w-[200px] relative')}
                       {renderSortableHeader('NIS', 'nis', 'py-3 px-3.5 w-28')}
                       {renderSortableHeader('Alamat', 'alamat', 'py-3 px-3.5 w-48')}
-                      <th className="py-3 px-3.5 w-20 text-center">Aksi</th>
+                      <th className="py-3 px-3.5 w-20 text-center sticky right-0 bg-slate-100/95 backdrop-blur-xs z-10 border-l border-slate-200/60 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.05)]">
+                        Aksi
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
@@ -1700,12 +2098,6 @@ export default function KamarSub({
                                     <span className="inline-block text-[9.5px] font-extrabold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
                                       {s.statusDomisili || s.status || 'Muqim'}
                                     </span>
-                                    {isKetua && (
-                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-[9.5px] font-bold border border-amber-200/60">
-                                        <Crown className="w-3 h-3 text-amber-500 fill-amber-400 shrink-0" />
-                                        Ketua
-                                      </span>
-                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1717,7 +2109,7 @@ export default function KamarSub({
                             <td className="py-3 px-3.5 text-slate-500 text-[11px] truncate max-w-[180px]">
                               {s.desa ? `Ds. ${s.desa}, Kec. ${s.kecamatan || '-'}` : (s.alamat || s.asal || '-')}
                             </td>
-                            <td className="py-3 px-3.5 text-center">
+                            <td className="py-3 px-3.5 text-center sticky right-0 bg-white group-hover:bg-purple-50/30 z-10 border-l border-slate-100 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.03)]">
                               <div className="flex items-center justify-center">
                                 {canWriteCurrent && (
                                   <button
@@ -1778,7 +2170,9 @@ export default function KamarSub({
               </div>
             )}
                   </>
-                ) : (
+                )}
+              </>
+            ) : (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-12 text-center space-y-3">
                     <Home className="w-10 h-10 text-slate-300 mx-auto" />
                     <h3 className="text-xs font-bold text-slate-600">Pilih Kamar di Panel Kiri</h3>
