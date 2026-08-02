@@ -281,13 +281,17 @@ export default function App() {
           } else if ((payload.action === 'insert' || payload.action === 'update') && payload.data) {
             const camelData = snakeToCamel(payload.data) as Santri;
             setSantriList(prev => {
-              const idx = prev.findIndex(s => s.id === camelData.id);
+              const pending = pendingOperations.current.get(camelData.id);
+              const dataToApply = (pending && (Date.now() - pending.timestamp < 10000))
+                ? { ...camelData, ...pending.data }
+                : camelData;
+              const idx = prev.findIndex(s => s.id === dataToApply.id);
               if (idx >= 0) {
                 const next = [...prev];
-                next[idx] = { ...next[idx], ...camelData };
+                next[idx] = { ...next[idx], ...dataToApply };
                 return next;
               }
-              return [camelData, ...prev];
+              return [dataToApply, ...prev];
             });
           }
         } else if (payload.table === 'bendahara') {

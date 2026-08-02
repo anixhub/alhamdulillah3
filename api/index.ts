@@ -340,16 +340,19 @@ function packPendidikanFormal(payload: any): any {
   if (!payload || typeof payload !== "object") return payload;
   if (Array.isArray(payload)) return payload.map(packPendidikanFormal);
   const copy = { ...payload };
-  const pfVal = String(copy.pendidikan_formal || copy.pendidikanFormal || "").trim();
-  const kelasVal = String(copy.kelas || "").trim();
+  const pfVal = String(copy.pendidikan_formal ?? copy.pendidikanFormal ?? "").trim();
 
-  if (pfVal && pfVal.toLowerCase() !== 'tanpa kelas' && kelasVal.toLowerCase() !== 'tanpa kelas') {
+  if (pfVal && pfVal.toLowerCase() !== 'tanpa kelas' && pfVal.toLowerCase() !== 'tidak terdaftar' && pfVal.toLowerCase() !== 'tidak sekolah') {
     let existingNotes = (copy.catatan || "").replace(/\[PF:.*?\]\s*/g, "").trim();
     copy.catatan = `[PF:${pfVal}] ${existingNotes}`.trim();
+    copy.pendidikan_formal = pfVal;
+    copy.pendidikanFormal = pfVal;
   } else {
     if (copy.catatan && typeof copy.catatan === "string") {
       copy.catatan = copy.catatan.replace(/\[PF:.*?\]\s*/g, "").trim() || null;
     }
+    copy.pendidikan_formal = null;
+    copy.pendidikanFormal = null;
   }
   return copy;
 }
@@ -361,10 +364,15 @@ function unpackPendidikanFormal(data: any): any {
     const copy = { ...data };
     if (copy.catatan && typeof copy.catatan === "string" && copy.catatan.includes("[PF:")) {
       const match = copy.catatan.match(/\[PF:(.*?)\]/);
-      if (match) {
-        copy.pendidikan_formal = copy.pendidikan_formal || match[1];
+      if (match && match[1]) {
+        copy.pendidikan_formal = match[1];
+        copy.pendidikanFormal = match[1];
         copy.catatan = copy.catatan.replace(/\[PF:.*?\]\s*/g, "").trim() || null;
       }
+    } else {
+      const val = copy.pendidikan_formal || copy.pendidikanFormal || null;
+      copy.pendidikan_formal = val;
+      copy.pendidikanFormal = val;
     }
     return copy;
   }
