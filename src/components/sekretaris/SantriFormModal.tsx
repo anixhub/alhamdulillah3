@@ -1480,7 +1480,7 @@ export default function SantriFormModal({
       statusDomisili: form.statusKeanggotaan === 'Aktif' ? form.statusDomisili : undefined,
       statusEmis: form.statusEmis || 'Belum',
       statusVerval: form.statusEmis === 'Terdaftar' ? (form.statusVerval || 'Proses') : 'Proses',
-      tanggalKeluar: (form.statusKeanggotaan === 'Alumni' || form.statusKeanggotaan === 'Meninggal') ? (form.tanggalKeluar || undefined) : undefined,
+      tanggalKeluar: (form.statusKeanggotaan === 'Alumni' || form.statusKeanggotaan === 'Meninggal') ? (form.tanggalKeluar || '') : '',
       catatan: form.catatan || undefined,
       pendidikanTerakhir: form.pendidikanTerakhir,
 
@@ -2269,9 +2269,9 @@ export default function SantriFormModal({
                         <BirthDatePicker
                           label={
                             <span className="flex flex-wrap items-center gap-1.5">
-                              <span>Tanggal Keluar / Wafat</span>
+                              <span>Tanggal Keluar</span>
                               {form.statusKeanggotaan === 'Aktif' && (
-                                <span className="text-[10px] text-slate-400 font-normal lowercase">(Khusus Alumni/Wafat)</span>
+                                <span className="text-[10px] text-slate-400 font-normal lowercase">(Khusus Alumni)</span>
                               )}
                             </span>
                           }

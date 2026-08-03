@@ -195,7 +195,7 @@ export default function BulkEditModal({
           if (bulkSelectedFields.statusKeanggotaan) {
             updated.statusKeanggotaan = bulkForm.statusKeanggotaan;
             if (bulkForm.statusKeanggotaan === 'Aktif') {
-              updated.tanggalKeluar = undefined;
+              updated.tanggalKeluar = '';
               if (!updated.statusDomisili) updated.statusDomisili = 'Muqim';
             } else {
               updated.statusDomisili = undefined;

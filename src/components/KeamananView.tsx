@@ -1451,6 +1451,20 @@ function getOrdinalIndonesian(num: number): string {
   return `Pelanggaran ${mapping[num] || `ke-${num}`}`;
 }
 
+export function parseRulesArray(rules: any): RuleRepetisi[] {
+  if (!rules) return [];
+  if (Array.isArray(rules)) return rules;
+  if (typeof rules === 'string') {
+    try {
+      const parsed = JSON.parse(rules);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 interface KeamananViewProps {
   keamananList: KeamananRecord[];
   onAddKeamanan: (newRec: KeamananRecord) => void;
@@ -3466,7 +3480,11 @@ export default function KeamananView({
       try {
         const data = await fetchTableData<KatalogPelanggaranItem>('katalog_pelanggaran', 'smartsantri_katalog_pelanggaran', DEFAULT_KATALOG);
         if (isMounted && data && data.length > 0) {
-          setKatalog(data);
+          const sanitized = data.map(item => ({
+            ...item,
+            rules: parseRulesArray(item.rules)
+          }));
+          setKatalog(sanitized);
         }
       } catch (err) {
         console.error("Gagal memuat katalog pelanggaran (Buku Induk) dari Supabase:", err);
@@ -3531,13 +3549,14 @@ export default function KeamananView({
       let finalPoin = selectedKatalogItem.defaultPoin;
       let finalTazir = selectedKatalogItem.defaultTazir;
 
-      const matchedRule = selectedKatalogItem.rules.find(r => r.kaliKe === nextOccurrence);
+      const itemRules = parseRulesArray(selectedKatalogItem.rules);
+      const matchedRule = itemRules.find(r => Number(r.kaliKe) === nextOccurrence);
       if (matchedRule) {
         finalPoin = matchedRule.poin;
         finalTazir = matchedRule.tazir || selectedKatalogItem.defaultTazir;
       } else {
         // No exact match found, apply Strategy based on rules
-        const sorted = [...selectedKatalogItem.rules].sort((a, b) => a.kaliKe - b.kaliKe);
+        const sorted = [...itemRules].sort((a, b) => Number(a.kaliKe) - Number(b.kaliKe));
         const strategy = selectedKatalogItem.repetitionStrategy || 'same_as_2';
 
         const hasCustomStrategy = strategy === 'custom';
@@ -3545,7 +3564,7 @@ export default function KeamananView({
           ? sorted.slice(0, -1) 
           : sorted;
         const highestSequentialKali = sequentialRules.length > 0 
-          ? sequentialRules[sequentialRules.length - 1].kaliKe 
+          ? Number(sequentialRules[sequentialRules.length - 1].kaliKe) 
           : 1;
 
         if (strategy === 'same_as_2') {
@@ -3566,7 +3585,7 @@ export default function KeamananView({
             finalPoin = selectedKatalogItem.defaultPoin;
             finalTazir = selectedKatalogItem.defaultTazir + " (Siklus Kali ke-1)";
           } else {
-            const matchedActiveRule = selectedKatalogItem.rules.find(r => r.kaliKe === activeStep);
+            const matchedActiveRule = itemRules.find(r => Number(r.kaliKe) === activeStep);
             if (matchedActiveRule) {
               finalPoin = matchedActiveRule.poin;
               finalTazir = (matchedActiveRule.tazir || selectedKatalogItem.defaultTazir) + ` (Siklus Kali ke-${activeStep})`;
@@ -3686,9 +3705,25 @@ export default function KeamananView({
     e.preventDefault();
     if (!catNama.trim()) return;
 
-    const sortedRules = [...catRules]
-      .filter(r => r.kaliKe > 0)
+    // Clean and deduplicate rules by numeric kaliKe
+    const cleanedRules: RuleRepetisi[] = [];
+    const seenKali = new Set<number>();
+    const sortedCatRules = [...catRules]
+      .map(r => ({
+        ...r,
+        kaliKe: Number(r.kaliKe) || 2,
+        poin: Number(r.poin) || 0,
+        tazir: String(r.tazir || '')
+      }))
+      .filter(r => r.kaliKe > 1)
       .sort((a, b) => a.kaliKe - b.kaliKe);
+
+    for (const r of sortedCatRules) {
+      if (!seenKali.has(r.kaliKe)) {
+        seenKali.add(r.kaliKe);
+        cleanedRules.push(r);
+      }
+    }
 
     if (catalogToEdit) {
       const updatedItemFields = {
@@ -3697,7 +3732,7 @@ export default function KeamananView({
         deskripsi: catDeskripsi.trim() || undefined,
         defaultPoin: Number(catDefaultPoin),
         defaultTazir: catDefaultTazir.trim(),
-        rules: sortedRules,
+        rules: cleanedRules,
         repetitionStrategy: catRepetitionStrategy,
         gender: catalogToEdit.gender || bukuIndukGender
       };
@@ -3726,7 +3761,7 @@ export default function KeamananView({
         deskripsi: catDeskripsi.trim() || undefined,
         defaultPoin: Number(catDefaultPoin),
         defaultTazir: catDefaultTazir.trim(),
-        rules: sortedRules,
+        rules: cleanedRules,
         repetitionStrategy: catRepetitionStrategy,
         gender: bukuIndukGender
       };
@@ -3756,18 +3791,19 @@ export default function KeamananView({
       const rule2: RuleRepetisi = {
         id: 'R-2-' + Math.random().toString(36).slice(-4),
         kaliKe: 2,
-        poin: catDefaultPoin * 2,
+        poin: Number(catDefaultPoin) * 2,
         tazir: ''
       };
       setCatRules([rule2]);
       setCatRepetitionStrategy('same_as_2');
     } else {
-      const maxKali = Math.max(...catRules.map(r => r.kaliKe), 1);
+      const validKalis = catRules.map(r => Number(r.kaliKe)).filter(n => !isNaN(n) && n > 1);
+      const maxKali = validKalis.length > 0 ? Math.max(...validKalis) : 1;
       const nextKali = maxKali + 1;
       const newRule: RuleRepetisi = {
         id: 'R-' + nextKali + '-' + Math.random().toString(36).slice(-4),
         kaliKe: nextKali,
-        poin: catDefaultPoin * nextKali,
+        poin: Number(catDefaultPoin) * nextKali,
         tazir: ''
       };
       setCatRules([...catRules, newRule]);
@@ -3781,6 +3817,7 @@ export default function KeamananView({
   const removeRepetitionRule = (id: string) => {
     const remaining = catRules.filter(r => r.id !== id);
     const reindexed = remaining
+      .map(r => ({ ...r, kaliKe: Number(r.kaliKe) || 2 }))
       .sort((a, b) => a.kaliKe - b.kaliKe)
       .map((r, index) => ({
         ...r,
@@ -3792,21 +3829,22 @@ export default function KeamananView({
   const handleStrategyChange = (newStrategy: 'repeat_1_2' | 'same_as_2' | 'custom') => {
     setCatRepetitionStrategy(newStrategy);
     if (newStrategy === 'custom') {
-      const maxKali = catRules.length > 0 ? Math.max(...catRules.map(r => r.kaliKe)) : 1;
+      const validKalis = catRules.map(r => Number(r.kaliKe)).filter(n => !isNaN(n) && n > 1);
+      const maxKali = validKalis.length > 0 ? Math.max(...validKalis) : 1;
       const nextKali = maxKali + 1;
-      const exists = catRules.some(r => r.kaliKe === nextKali);
+      const exists = catRules.some(r => Number(r.kaliKe) === nextKali);
       if (!exists) {
         const customRule: RuleRepetisi = {
           id: 'R-' + nextKali + '-' + Math.random().toString(36).slice(-4),
           kaliKe: nextKali,
-          poin: catDefaultPoin * nextKali,
+          poin: Number(catDefaultPoin) * nextKali,
           tazir: ''
         };
         setCatRules([...catRules, customRule]);
       }
     } else {
       if (catRepetitionStrategy === 'custom') {
-        const sorted = [...catRules].sort((a, b) => a.kaliKe - b.kaliKe);
+        const sorted = [...catRules].sort((a, b) => Number(a.kaliKe) - Number(b.kaliKe));
         if (sorted.length > 0) {
           const highest = sorted[sorted.length - 1];
           setCatRules(catRules.filter(r => r.id !== highest.id));
@@ -3816,18 +3854,21 @@ export default function KeamananView({
   };
 
   const updateRuleValue = (kaliKe: number, field: 'poin' | 'tazir', value: any) => {
-    let exists = catRules.some(r => r.kaliKe === kaliKe);
-    if (exists) {
-      setCatRules(catRules.map(r => r.kaliKe === kaliKe ? { ...r, [field]: value } : r));
-    } else {
-      const newRule: RuleRepetisi = {
-        id: `R-${kaliKe}-` + Math.random().toString(36).slice(-4),
-        kaliKe,
-        poin: field === 'poin' ? Number(value) : (catDefaultPoin * 2),
-        tazir: field === 'tazir' ? String(value) : ''
-      };
-      setCatRules([...catRules, newRule]);
-    }
+    const targetKali = Number(kaliKe) || 2;
+    setCatRules(prev => {
+      const exists = prev.some(r => Number(r.kaliKe) === targetKali);
+      if (exists) {
+        return prev.map(r => Number(r.kaliKe) === targetKali ? { ...r, [field]: value } : r);
+      } else {
+        const newRule: RuleRepetisi = {
+          id: `R-${targetKali}-` + Math.random().toString(36).slice(-4),
+          kaliKe: targetKali,
+          poin: field === 'poin' ? Number(value) : (Number(catDefaultPoin) * 2),
+          tazir: field === 'tazir' ? String(value) : ''
+        };
+        return [...prev, newRule];
+      }
+    });
   };
 
   // Open Add catalog
@@ -3844,15 +3885,35 @@ export default function KeamananView({
   };
 
   // Open Edit catalog
-  const openEditCatalog = (item: KatalogPelanggaranItem, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const openEditCatalog = (item: KatalogPelanggaranItem, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!item) return;
     setCatalogToEdit(item);
-    setCatNama(item.nama);
-    setCatKategori(item.kategori);
+    setCatNama(item.nama || '');
+    setCatKategori(item.kategori || 'Ringan');
     setCatDeskripsi(item.deskripsi || '');
-    setCatDefaultPoin(item.defaultPoin);
-    setCatDefaultTazir(item.defaultTazir);
-    setCatRules((item.rules || []).filter(r => r.kaliKe > 1));
+    setCatDefaultPoin(Number(item.defaultPoin) || 0);
+    setCatDefaultTazir(item.defaultTazir || '');
+
+    const loadedRules = parseRulesArray(item.rules)
+      .map((r, idx) => ({
+        id: r.id || `R-${r.kaliKe || idx + 2}-` + Math.random().toString(36).slice(-4),
+        kaliKe: Number(r.kaliKe) || (idx + 2),
+        poin: Number(r.poin) || 0,
+        tazir: String(r.tazir || '')
+      }))
+      .filter(r => r.kaliKe > 1);
+
+    const uniqueRules: RuleRepetisi[] = [];
+    const seen = new Set<number>();
+    for (const r of loadedRules.sort((a, b) => a.kaliKe - b.kaliKe)) {
+      if (!seen.has(r.kaliKe)) {
+        seen.add(r.kaliKe);
+        uniqueRules.push(r);
+      }
+    }
+
+    setCatRules(uniqueRules);
     setCatRepetitionStrategy(item.repetitionStrategy || 'same_as_2');
     setIsCatalogModalOpen(true);
   };
@@ -5890,7 +5951,8 @@ export default function KeamananView({
 
                                 const isHighlighted = rec.id === highlightedRiwayatId;
                                 
-                                const isRepetition = matchedCat && matchedCat.rules && matchedCat.rules.length > 0;
+                                const matchedCatRules = parseRulesArray(matchedCat?.rules);
+                                const isRepetition = matchedCat && matchedCatRules.length > 0;
                                 let repInfo = null;
                                 if (isRepetition) {
                                   const { ordinal, periodeNama } = getRecordOrdinal(rec);
@@ -6156,7 +6218,7 @@ export default function KeamananView({
                                 </div>
 
                                 {/* Conditionally render based on whether there's repetition */}
-                                {item.rules && item.rules.length > 0 ? (
+                                {parseRulesArray(item.rules).length > 0 ? (
                                   /* Has Repetition: No main default boxes, directly show boxed timeline 1 to n */
                                   <div className="space-y-3">
                                     <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
@@ -6169,8 +6231,9 @@ export default function KeamananView({
                                           poin: item.defaultPoin,
                                           tazir: item.defaultTazir || '-'
                                         };
-                                        const sortedRules = [...(item.rules || [])]
-                                          .filter(r => r.kaliKe !== 1)
+                                        const sortedRules = [...parseRulesArray(item.rules)]
+                                          .map(r => ({ ...r, kaliKe: Number(r.kaliKe) || 2, poin: Number(r.poin) || 0, tazir: String(r.tazir || '') }))
+                                          .filter(r => r.kaliKe > 1)
                                           .sort((a, b) => a.kaliKe - b.kaliKe);
                                         const timelineRules = [baseRule, ...sortedRules];
                                         return timelineRules.map((rule, idx) => {
@@ -7317,7 +7380,7 @@ export default function KeamananView({
                   </div>
 
                   {/* AUTO CALCULATION AND REPETITION WARNING BANNER */}
-                  {selectedSantri && selectedKatalogItem && selectedKatalogItem.rules && selectedKatalogItem.rules.length > 0 && (
+                  {selectedSantri && selectedKatalogItem && parseRulesArray(selectedKatalogItem.rules).length > 0 && (
                     <div className="bg-yellow-400 p-3 rounded-xl flex items-center gap-2 text-yellow-950 font-bold text-xs border border-yellow-500/25">
                       <span className="w-2 h-2 rounded-full bg-yellow-700 animate-pulse shrink-0" />
                       <span>Pelanggaran Ke-{occurrenceCount + 1} selama &quot;{activePeriodeObj ? activePeriodeObj.nama : 'Semua Periode'}&quot;</span>
@@ -7720,14 +7783,16 @@ export default function KeamananView({
       {/* ======================================= */}
       <AnimatePresence>
         {selectedCatalogDetail && (() => {
-          const hasRepetition = selectedCatalogDetail.rules && selectedCatalogDetail.rules.length > 0;
+          const detailRules = parseRulesArray(selectedCatalogDetail.rules);
+          const hasRepetition = detailRules.length > 0;
           const baseRule = {
             kaliKe: 1,
             poin: selectedCatalogDetail.defaultPoin,
             tazir: selectedCatalogDetail.defaultTazir || '-'
           };
-          const sortedRules = [...(selectedCatalogDetail.rules || [])]
-            .filter(r => r.kaliKe !== 1)
+          const sortedRules = [...detailRules]
+            .map(r => ({ ...r, kaliKe: Number(r.kaliKe) || 2, poin: Number(r.poin) || 0, tazir: String(r.tazir || '') }))
+            .filter(r => r.kaliKe > 1)
             .sort((a, b) => a.kaliKe - b.kaliKe);
           const timelineRules = [baseRule, ...sortedRules];
 
@@ -7849,8 +7914,11 @@ export default function KeamananView({
                     <div className="bg-white border-t border-slate-200 p-4 flex gap-3 sticky bottom-0 left-0 right-0 z-10 shadow-lg">
                       <button
                         onClick={(e) => {
+                          const targetItem = selectedCatalogDetail;
                           setSelectedCatalogDetail(null);
-                          openEditCatalog(selectedCatalogDetail, e);
+                          if (targetItem) {
+                            openEditCatalog(targetItem, e);
+                          }
                         }}
                         className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs select-none"
                       >
@@ -7859,8 +7927,11 @@ export default function KeamananView({
                       </button>
                       <button
                         onClick={(e) => {
+                          const targetItem = selectedCatalogDetail;
                           setSelectedCatalogDetail(null);
-                          handleDeleteCatalogItem(selectedCatalogDetail.id, e);
+                          if (targetItem) {
+                            handleDeleteCatalogItem(targetItem.id, e);
+                          }
                         }}
                         className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs select-none"
                       >
@@ -8680,7 +8751,8 @@ export default function KeamananView({
                       </p>
                       {(() => {
                         const matchedCat = katalog.find(k => k.nama.toLowerCase() === viewingRecordDetail.jenisPelanggaran.toLowerCase());
-                        const isRepetition = matchedCat && matchedCat.rules && matchedCat.rules.length > 0;
+                        const matchedCatRules = parseRulesArray(matchedCat?.rules);
+                        const isRepetition = matchedCat && matchedCatRules.length > 0;
                         if (!isRepetition) return null;
                         const { ordinal, periodeNama } = getRecordOrdinal(viewingRecordDetail);
                         return (

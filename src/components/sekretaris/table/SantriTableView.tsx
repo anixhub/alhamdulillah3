@@ -2202,7 +2202,7 @@ export default function SantriTableView({
                               statusKeanggotaan: valToApply as any,
                             };
                             if (valToApply === 'Aktif') {
-                              updated.tanggalKeluar = undefined;
+                              updated.tanggalKeluar = '';
                               if (!updated.statusDomisili) updated.statusDomisili = 'Muqim';
                             } else {
                               updated.statusDomisili = undefined;
