@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Santri, KeamananRecord, BendaharaRecord, Kompleks, Kamar } from '../types';
 import { INITIAL_KOMPLEKS, INITIAL_KAMAR } from './HumasyView';
+import { fetchTableData, insertTableRow, updateTableRow, deleteTableRow, subscribeRealtimeChanges } from '../lib/api';
 
 interface HomeViewProps {
   santriList: Santri[];
@@ -67,13 +68,24 @@ export default function HomeView({
     return () => clearInterval(timer);
   }, []);
 
-  // Task list state - EMPTY default as requested (No fake dummy tasks)
+  // Normalize task item
+  const normalizeTask = (item: any): TaskItem => ({
+    id: String(item.id || Date.now()),
+    text: item.text || item.judul || item.title || 'Tugas Tanpa Judul',
+    description: item.description || item.deskripsi || '',
+    status: item.status === 'done' || item.status === 'Selesai' ? 'done' : 'pending',
+    deadlineTimestamp: Number(item.deadlineTimestamp || item.deadline_timestamp || item.due_date) || (Date.now() + 3600000),
+    color: (item.color === 'green' || item.color === 'yellow' || item.color === 'blue') ? item.color : 'yellow',
+    createdAt: Number(item.createdAt || item.created_at) || Date.now(),
+  });
+
+  // Task list state - Initialized from localStorage, then fetched from database
   const [tasks, setTasks] = useState<TaskItem[]>(() => {
     try {
       const local = localStorage.getItem('smartsantri_dashboard_tasks');
       if (local) {
         const parsed = JSON.parse(local);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) return parsed.map(normalizeTask);
       }
     } catch (e) {
       console.error(e);
@@ -97,9 +109,40 @@ export default function HomeView({
   const [taskFormMinutes, setTaskFormMinutes] = useState<number>(0);
   const [taskFormSeconds, setTaskFormSeconds] = useState<number>(0);
 
-  // Save tasks to localStorage
+  // Fetch tasks from database and subscribe to real-time updates across devices
   useEffect(() => {
-    localStorage.setItem('smartsantri_dashboard_tasks', JSON.stringify(tasks));
+    let isMounted = true;
+    const loadTasksFromDb = async () => {
+      try {
+        const data = await fetchTableData<any>('tugas', 'smartsantri_dashboard_tasks', []);
+        if (isMounted && Array.isArray(data)) {
+          const normalized = data.map(normalizeTask);
+          setTasks(normalized);
+        }
+      } catch (err) {
+        console.error("Gagal sinkronisasi tugas dari database:", err);
+      }
+    };
+
+    loadTasksFromDb();
+
+    const unsubscribeWs = subscribeRealtimeChanges((payload: any) => {
+      if (!payload.table || payload.table === 'tugas' || payload.table === 'tasks' || payload.action === 'truncate_all') {
+        loadTasksFromDb();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribeWs();
+    };
+  }, []);
+
+  // Save tasks to localStorage cache
+  useEffect(() => {
+    try {
+      localStorage.setItem('smartsantri_dashboard_tasks', JSON.stringify(tasks));
+    } catch (e) {}
   }, [tasks]);
 
   useEffect(() => {
@@ -431,11 +474,15 @@ export default function HomeView({
     };
   };
 
-  // Handle task actions
-  const toggleTaskStatus = (id: string) => {
+  // Handle task actions with database synchronization
+  const toggleTaskStatus = async (id: string) => {
+    const targetTask = tasks.find(t => t.id === id);
+    if (!targetTask) return;
+
+    const nextStatus = targetTask.status === 'done' ? 'pending' : 'done';
+
     setTasks(prev => prev.map(t => {
       if (t.id === id) {
-        const nextStatus = t.status === 'done' ? 'pending' : 'done';
         if (selectedTaskDetail && selectedTaskDetail.id === id) {
           setSelectedTaskDetail({ ...selectedTaskDetail, status: nextStatus });
         }
@@ -443,31 +490,51 @@ export default function HomeView({
       }
       return t;
     }));
+
+    try {
+      await updateTableRow<any>('tugas', 'smartsantri_dashboard_tasks', id, { 
+        status: nextStatus,
+        updated_at: new Date().toISOString()
+      });
+    } catch (e) {
+      console.error("Gagal update status tugas di database:", e);
+    }
   };
 
-  const deleteTask = (id: string) => {
+  const deleteTask = async (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
     if (selectedTaskDetail && selectedTaskDetail.id === id) {
       setSelectedTaskDetail(null);
     }
+
+    try {
+      await deleteTableRow('tugas', 'smartsantri_dashboard_tasks', id);
+    } catch (e) {
+      console.error("Gagal menghapus tugas dari database:", e);
+    }
   };
 
-  const handleAddTaskSubmit = (e: React.FormEvent) => {
+  const handleAddTaskSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!taskFormText.trim()) return;
 
     const totalSec = (taskFormDays * 86400) + (taskFormHours * 3600) + (taskFormMinutes * 60) + taskFormSeconds;
     const totalMs = totalSec * 1000;
     const deadlineTimestamp = Date.now() + (totalMs > 0 ? totalMs : 3600000);
+    const activeUsername = localStorage.getItem('smartsantri_active_username') || 'pengurus';
 
-    const newTask: TaskItem = {
-      id: Date.now().toString(),
+    const newTask: TaskItem & { username?: string; judul?: string; deskripsi?: string; deadline_timestamp?: number } = {
+      id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
       text: taskFormText.trim(),
+      judul: taskFormText.trim(),
       description: taskFormDesc.trim(),
+      deskripsi: taskFormDesc.trim(),
       status: 'pending',
       deadlineTimestamp,
+      deadline_timestamp: deadlineTimestamp,
       color: taskFormColor,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      username: activeUsername
     };
 
     setTasks(prev => [newTask, ...prev]);
@@ -478,6 +545,12 @@ export default function HomeView({
     setTaskFormMinutes(0);
     setTaskFormSeconds(0);
     setIsAddTaskModalOpen(false);
+
+    try {
+      await insertTableRow('tugas', 'smartsantri_dashboard_tasks', newTask);
+    } catch (e) {
+      console.error("Gagal menyimpan tugas baru ke database:", e);
+    }
   };
 
   // Filter tasks by search query matching eligible keyword in text or description

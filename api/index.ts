@@ -443,12 +443,18 @@ async function ensureTableExists(table: string, pool: mysql.Pool) {
           \`id\` VARCHAR(100) NOT NULL PRIMARY KEY,
           \`user_id\` VARCHAR(100) NULL,
           \`username\` VARCHAR(100) NULL,
-          \`judul\` VARCHAR(255) NOT NULL,
-          \`deskripsi\` TEXT NULL,
-          \`status\` VARCHAR(50) DEFAULT 'Belum Selesai',
+          \`text\` LONGTEXT NULL,
+          \`judul\` VARCHAR(255) NULL,
+          \`description\` LONGTEXT NULL,
+          \`deskripsi\` LONGTEXT NULL,
+          \`status\` VARCHAR(50) DEFAULT 'pending',
+          \`deadline_timestamp\` BIGINT NULL,
+          \`deadlineTimestamp\` BIGINT NULL,
+          \`color\` VARCHAR(50) DEFAULT 'yellow',
           \`prioritas\` VARCHAR(20) DEFAULT 'Sedang',
           \`tenggat_waktu\` DATE NULL,
           \`created_at\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+          \`createdAt\` BIGINT NULL,
           \`updated_at\` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
@@ -457,15 +463,26 @@ async function ensureTableExists(table: string, pool: mysql.Pool) {
           \`id\` VARCHAR(100) NOT NULL PRIMARY KEY,
           \`user_id\` VARCHAR(100) NULL,
           \`username\` VARCHAR(100) NULL,
-          \`title\` VARCHAR(255) NOT NULL,
-          \`description\` TEXT NULL,
+          \`text\` LONGTEXT NULL,
+          \`title\` VARCHAR(255) NULL,
+          \`description\` LONGTEXT NULL,
           \`status\` VARCHAR(50) DEFAULT 'pending',
-          \`priority\` VARCHAR(20) DEFAULT 'medium',
-          \`due_date\` DATE NULL,
+          \`deadline_timestamp\` BIGINT NULL,
+          \`color\` VARCHAR(50) DEFAULT 'yellow',
           \`created_at\` DATETIME DEFAULT CURRENT_TIMESTAMP,
           \`updated_at\` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
+
+      const tugasCols = ['text', 'description', 'deadline_timestamp', 'deadlineTimestamp', 'color', 'createdAt', 'user_id', 'username', 'judul', 'deskripsi', 'status', 'prioritas', 'tenggat_waktu'];
+      for (const col of tugasCols) {
+        try {
+          await pool.query(`ALTER TABLE \`tugas\` ADD COLUMN \`${col}\` LONGTEXT NULL`);
+        } catch (e) {}
+        try {
+          await pool.query(`ALTER TABLE \`tasks\` ADD COLUMN \`${col}\` LONGTEXT NULL`);
+        } catch (e) {}
+      }
     } catch (e) {
       console.warn("Could not auto-create tasks/tugas table:", e);
     }
