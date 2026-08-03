@@ -330,6 +330,33 @@ CREATE TABLE IF NOT EXISTS `admin_chat` (
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 12. TABEL TUGAS & TASKS
+CREATE TABLE IF NOT EXISTS `tugas` (
+  `id` VARCHAR(100) NOT NULL PRIMARY KEY,
+  `user_id` VARCHAR(100),
+  `username` VARCHAR(100),
+  `judul` VARCHAR(255) NOT NULL,
+  `deskripsi` TEXT,
+  `status` VARCHAR(50) DEFAULT 'Belum Selesai',
+  `prioritas` VARCHAR(20) DEFAULT 'Sedang',
+  `tenggat_waktu` DATE,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `tasks` (
+  `id` VARCHAR(100) NOT NULL PRIMARY KEY,
+  `user_id` VARCHAR(100),
+  `username` VARCHAR(100),
+  `title` VARCHAR(255) NOT NULL,
+  `description` TEXT,
+  `status` VARCHAR(50) DEFAULT 'pending',
+  `priority` VARCHAR(20) DEFAULT 'medium',
+  `due_date` DATE,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- SEED PERIODE DEFAULT
 INSERT INTO `periode` (`id`, `nama`, `is_active`) VALUES ('Semua', 'Semua Periode', 1)
 ON DUPLICATE KEY UPDATE `id`=`id`;

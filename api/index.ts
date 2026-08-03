@@ -104,7 +104,9 @@ const VALID_TABLES = new Set([
   "role_has_permissions",
   "document_generation_logs",
   "document_templates",
-  "admin_chat"
+  "admin_chat",
+  "tasks",
+  "tugas"
 ]);
 
 // -------------------------------------------------------------
@@ -433,6 +435,39 @@ async function ensureTableExists(table: string, pool: mysql.Pool) {
       }
     } catch (e) {
       console.warn("Could not auto-create admin_chat table:", e);
+    }
+  } else if (table === 'tugas' || table === 'tasks') {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS \`tugas\` (
+          \`id\` VARCHAR(100) NOT NULL PRIMARY KEY,
+          \`user_id\` VARCHAR(100) NULL,
+          \`username\` VARCHAR(100) NULL,
+          \`judul\` VARCHAR(255) NOT NULL,
+          \`deskripsi\` TEXT NULL,
+          \`status\` VARCHAR(50) DEFAULT 'Belum Selesai',
+          \`prioritas\` VARCHAR(20) DEFAULT 'Sedang',
+          \`tenggat_waktu\` DATE NULL,
+          \`created_at\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+          \`updated_at\` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS \`tasks\` (
+          \`id\` VARCHAR(100) NOT NULL PRIMARY KEY,
+          \`user_id\` VARCHAR(100) NULL,
+          \`username\` VARCHAR(100) NULL,
+          \`title\` VARCHAR(255) NOT NULL,
+          \`description\` TEXT NULL,
+          \`status\` VARCHAR(50) DEFAULT 'pending',
+          \`priority\` VARCHAR(20) DEFAULT 'medium',
+          \`due_date\` DATE NULL,
+          \`created_at\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+          \`updated_at\` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+    } catch (e) {
+      console.warn("Could not auto-create tasks/tugas table:", e);
     }
   }
 }
