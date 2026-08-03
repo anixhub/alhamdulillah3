@@ -41,6 +41,7 @@ interface TaskItem {
   deadlineTimestamp?: number;
   color: 'green' | 'yellow' | 'blue';
   createdAt: number;
+  username?: string;
 }
 
 export default function HomeView({ 
@@ -77,6 +78,7 @@ export default function HomeView({
     deadlineTimestamp: Number(item.deadlineTimestamp || item.deadline_timestamp || item.due_date) || (Date.now() + 3600000),
     color: (item.color === 'green' || item.color === 'yellow' || item.color === 'blue') ? item.color : 'yellow',
     createdAt: Number(item.createdAt || item.created_at) || Date.now(),
+    username: (item.username || item.user_id || '').toLowerCase().trim()
   });
 
   // Task list state - Initialized from localStorage, then fetched from database
@@ -521,9 +523,13 @@ export default function HomeView({
     const totalSec = (taskFormDays * 86400) + (taskFormHours * 3600) + (taskFormMinutes * 60) + taskFormSeconds;
     const totalMs = totalSec * 1000;
     const deadlineTimestamp = Date.now() + (totalMs > 0 ? totalMs : 3600000);
-    const activeUsername = localStorage.getItem('smartsantri_active_username') || 'pengurus';
+    const currentActiveUsername = (
+      localStorage.getItem('smartsantri_active_username') || 
+      localStorage.getItem('smartsantri_active_role') || 
+      'pengurus'
+    ).toLowerCase().trim();
 
-    const newTask: TaskItem & { username?: string; judul?: string; deskripsi?: string; deadline_timestamp?: number } = {
+    const newTask: TaskItem & { username?: string; user_id?: string; judul?: string; deskripsi?: string; deadline_timestamp?: number } = {
       id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
       text: taskFormText.trim(),
       judul: taskFormText.trim(),
@@ -534,7 +540,8 @@ export default function HomeView({
       deadline_timestamp: deadlineTimestamp,
       color: taskFormColor,
       createdAt: Date.now(),
-      username: activeUsername
+      username: currentActiveUsername,
+      user_id: currentActiveUsername
     };
 
     setTasks(prev => [newTask, ...prev]);
@@ -553,15 +560,32 @@ export default function HomeView({
     }
   };
 
+  // Derive active username for filtering tasks per account
+  const currentActiveUser = (
+    localStorage.getItem('smartsantri_active_username') || 
+    localStorage.getItem('smartsantri_active_role') || 
+    'pengurus'
+  ).toLowerCase().trim();
+
+  // Filter tasks to only show tasks belonging to the active account
+  const userTasks = useMemo(() => {
+    return tasks.filter(t => {
+      if (!t.username) {
+        return currentActiveUser.includes('superadmin') || currentActiveUser === 'pengurus';
+      }
+      return t.username.toLowerCase().trim() === currentActiveUser;
+    });
+  }, [tasks, currentActiveUser]);
+
   // Filter tasks by search query matching eligible keyword in text or description
   const filteredTasks = useMemo(() => {
-    if (!searchQuery.trim()) return tasks;
+    if (!searchQuery.trim()) return userTasks;
     const q = searchQuery.toLowerCase().trim();
-    return tasks.filter(t => 
+    return userTasks.filter(t => 
       t.text.toLowerCase().includes(q) || 
       (t.description && t.description.toLowerCase().includes(q))
     );
-  }, [tasks, searchQuery]);
+  }, [userTasks, searchQuery]);
 
   return (
     <motion.div 
