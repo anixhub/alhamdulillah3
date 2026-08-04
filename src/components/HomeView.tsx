@@ -111,6 +111,39 @@ export default function HomeView({
   const [taskFormMinutes, setTaskFormMinutes] = useState<number>(0);
   const [taskFormSeconds, setTaskFormSeconds] = useState<number>(0);
 
+  // Kompleks and Kamar state for capacity calculations
+  const [kompleksList, setKompleksList] = useState<Kompleks[]>([]);
+  const [kamarList, setKamarList] = useState<Kamar[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadKamarData = async () => {
+      try {
+        const kData = await fetchTableData<Kompleks>('kompleks', 'smartsantri_kompleks', INITIAL_KOMPLEKS);
+        const rmData = await fetchTableData<Kamar>('kamar', 'smartsantri_kamar', INITIAL_KAMAR);
+        if (isMounted) {
+          setKompleksList(kData || []);
+          setKamarList(rmData || []);
+        }
+      } catch (e) {
+        console.error("Gagal memuat data kamar untuk dashboard:", e);
+      }
+    };
+
+    loadKamarData();
+
+    const unsubscribeWs = subscribeRealtimeChanges((payload: any) => {
+      if (!payload.table || payload.table === 'kompleks' || payload.table === 'kamar' || payload.action === 'truncate_all') {
+        loadKamarData();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribeWs();
+    };
+  }, []);
+
   // Fetch tasks from database and subscribe to real-time updates across devices
   useEffect(() => {
     let isMounted = true;
@@ -334,26 +367,87 @@ export default function HomeView({
   const pctPutraMuqim = putraAktif > 0 ? Math.round((putraMuqim / putraAktif) * 100) : 0;
   const pctPutriMuqim = putriAktif > 0 ? Math.round((putriMuqim / putriAktif) * 100) : 0;
 
-  // 3. Kamar Terisi vs Belum Ditempatkan Real
-  const putraInKamar = useMemo(() => 
-    santriList.filter(s => s.gender === 'Putra' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && s.kamar && s.kamar.trim() !== '' && s.kamar !== '-').length
-  , [santriList]);
+  // 3. Lemari Terisi vs Belum Ditempatkan (Santri Belum Dapat Lemari) Real
+  const {
+    putraLemariTerisi,
+    putraTotalKapasitas,
+    putraBelumLemari,
+    pctPutraKamar,
+    putriLemariTerisi,
+    putriTotalKapasitas,
+    putriBelumLemari,
+    pctPutriKamar
+  } = useMemo(() => {
+    const activePutra = santriList.filter(s => s.gender === 'Putra' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan));
+    const activePutri = santriList.filter(s => s.gender === 'Putri' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan));
 
-  const putraBelumKamar = useMemo(() => 
-    santriList.filter(s => s.gender === 'Putra' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && (!s.kamar || s.kamar.trim() === '' || s.kamar === '-')).length
-  , [santriList]);
+    // Santri belum dapat lemari (active santri without nomorLemari)
+    const pBlm = activePutra.filter(s => !s.nomorLemari || s.nomorLemari.trim() === '' || s.nomorLemari === '-').length;
+    const piBlm = activePutri.filter(s => !s.nomorLemari || s.nomorLemari.trim() === '' || s.nomorLemari === '-').length;
 
-  const pctPutraKamar = (putraInKamar + putraBelumKamar) > 0 ? Math.round((putraInKamar / (putraInKamar + putraBelumKamar)) * 100) : 0;
+    // Filter Kompleks & Kamar by Gender
+    const pKompleksIds = (kompleksList || []).filter(k => k.gender === 'Putra' || (!k.gender && k.nama.toLowerCase().includes('putra'))).map(k => k.id);
+    const piKompleksIds = (kompleksList || []).filter(k => k.gender === 'Putri' || (!k.gender && k.nama.toLowerCase().includes('putri'))).map(k => k.id);
 
-  const putriInKamar = useMemo(() => 
-    santriList.filter(s => s.gender === 'Putri' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && s.kamar && s.kamar.trim() !== '' && s.kamar !== '-').length
-  , [santriList]);
+    const pKamar = (kamarList || []).filter(r => pKompleksIds.includes(r.kompleksId) || (!r.kompleksId && r.nama.toLowerCase().includes('putra')));
+    const piKamar = (kamarList || []).filter(r => piKompleksIds.includes(r.kompleksId) || (!r.kompleksId && r.nama.toLowerCase().includes('putri')));
 
-  const putriBelumKamar = useMemo(() => 
-    santriList.filter(s => s.gender === 'Putri' && (s.statusKeanggotaan === 'Aktif' || !s.statusKeanggotaan) && (!s.kamar || s.kamar.trim() === '' || s.kamar === '-')).length
-  , [santriList]);
+    const effPKamar = pKamar.length > 0 ? pKamar : (kamarList || []);
+    const effPiKamar = piKamar.length > 0 ? piKamar : (kamarList || []);
 
-  const pctPutriKamar = (putriInKamar + putriBelumKamar) > 0 ? Math.round((putriInKamar / (putriInKamar + putriBelumKamar)) * 100) : 0;
+    // Total Capacity
+    let capP = effPKamar.reduce((sum, r) => sum + (r.kapasitas || 15), 0);
+    let capPi = effPiKamar.reduce((sum, r) => sum + (r.kapasitas || 15), 0);
+
+    // Occupied locker slots calculation (counting filled locker slots per room, without double counting santri)
+    let filledP = 0;
+    effPKamar.forEach(r => {
+      const roomMembers = activePutra.filter(s => (s.kamar || '').trim().toLowerCase() === r.nama.trim().toLowerCase());
+      const occupiedSlots = new Set<string>();
+      roomMembers.forEach(s => {
+        if (s.nomorLemari && s.nomorLemari.trim() !== '' && s.nomorLemari !== '-') {
+          occupiedSlots.add(s.nomorLemari.trim());
+        }
+      });
+      filledP += occupiedSlots.size;
+    });
+
+    let filledPi = 0;
+    effPiKamar.forEach(r => {
+      const roomMembers = activePutri.filter(s => (s.kamar || '').trim().toLowerCase() === r.nama.trim().toLowerCase());
+      const occupiedSlots = new Set<string>();
+      roomMembers.forEach(s => {
+        if (s.nomorLemari && s.nomorLemari.trim() !== '' && s.nomorLemari !== '-') {
+          occupiedSlots.add(s.nomorLemari.trim());
+        }
+      });
+      filledPi += occupiedSlots.size;
+    });
+
+    // Fallback if no kamar defined in DB yet: count assigned santri directly
+    if (capP === 0) {
+      filledP = activePutra.filter(s => s.nomorLemari && s.nomorLemari.trim() !== '' && s.nomorLemari !== '-').length;
+      capP = Math.max(filledP + pBlm, 15);
+    }
+    if (capPi === 0) {
+      filledPi = activePutri.filter(s => s.nomorLemari && s.nomorLemari.trim() !== '' && s.nomorLemari !== '-').length;
+      capPi = Math.max(filledPi + piBlm, 15);
+    }
+
+    const pctP = capP > 0 ? Math.min(100, Math.round((filledP / capP) * 100)) : 0;
+    const pctPi = capPi > 0 ? Math.min(100, Math.round((filledPi / capPi) * 100)) : 0;
+
+    return {
+      putraLemariTerisi: filledP,
+      putraTotalKapasitas: capP,
+      putraBelumLemari: pBlm,
+      pctPutraKamar: pctP,
+      putriLemariTerisi: filledPi,
+      putriTotalKapasitas: capPi,
+      putriBelumLemari: piBlm,
+      pctPutriKamar: pctPi
+    };
+  }, [santriList, kamarList, kompleksList]);
 
   // 4. Monitor Emis Terdaftar Real (strictly matching statusEmis from Sekretaris module)
   const isEmisTerdaftarSantri = (s: Santri) => {
@@ -918,12 +1012,12 @@ export default function HomeView({
                   {/* Dual Badge Footer Box */}
                   <div className="w-full text-[11px] font-bold rounded-xl overflow-hidden shadow-3xs border border-sky-100 mt-1">
                     <div className="grid grid-cols-2 text-center">
-                      <div className="bg-[#299DFF] text-white py-1 px-0.5 font-extrabold">Kamar terisi</div>
+                      <div className="bg-[#299DFF] text-white py-1 px-0.5 font-extrabold">Lemari terisi</div>
                       <div className="bg-[#D0EBFF] text-[#0284C7] py-1 px-0.5 font-extrabold">Blm ditempatkan</div>
                     </div>
                     <div className="grid grid-cols-2 text-center border-t border-white">
-                      <div className="py-1.5 bg-[#299DFF] text-white font-black text-xs">{putraInKamar} <span className="font-medium text-sky-100 text-[10px]">/{putraInKamar + putraBelumKamar}</span></div>
-                      <div className="py-1.5 bg-[#D0EBFF] text-[#0284C7] font-black text-xs">{putraBelumKamar}</div>
+                      <div className="py-1.5 bg-[#299DFF] text-white font-black text-xs">{putraLemariTerisi} <span className="font-medium text-sky-100 text-[10px]">/{putraTotalKapasitas}</span></div>
+                      <div className="py-1.5 bg-[#D0EBFF] text-[#0284C7] font-black text-xs">{putraBelumLemari}</div>
                     </div>
                   </div>
                 </div>
@@ -967,12 +1061,12 @@ export default function HomeView({
                   {/* Dual Badge Footer Box */}
                   <div className="w-full text-[11px] font-bold rounded-xl overflow-hidden shadow-3xs border border-pink-100 mt-1">
                     <div className="grid grid-cols-2 text-center">
-                      <div className="bg-[#FF529A] text-white py-1 px-0.5 font-extrabold">Kamar terisi</div>
+                      <div className="bg-[#FF529A] text-white py-1 px-0.5 font-extrabold">Lemari terisi</div>
                       <div className="bg-[#FFD8E8] text-[#BE185D] py-1 px-0.5 font-extrabold">Blm ditempatkan</div>
                     </div>
                     <div className="grid grid-cols-2 text-center border-t border-white">
-                      <div className="py-1.5 bg-[#FF529A] text-white font-black text-xs">{putriInKamar} <span className="font-medium text-pink-100 text-[10px]">/{putriInKamar + putriBelumKamar}</span></div>
-                      <div className="py-1.5 bg-[#FFD8E8] text-[#BE185D] font-black text-xs">{putriBelumKamar}</div>
+                      <div className="py-1.5 bg-[#FF529A] text-white font-black text-xs">{putriLemariTerisi} <span className="font-medium text-pink-100 text-[10px]">/{putriTotalKapasitas}</span></div>
+                      <div className="py-1.5 bg-[#FFD8E8] text-[#BE185D] font-black text-xs">{putriBelumLemari}</div>
                     </div>
                   </div>
                 </div>

@@ -6,7 +6,7 @@ import {
   ArrowLeft, Search, GraduationCap, ArrowLeftRight, Check, CheckCircle2, CheckSquare, 
   UserCheck, AlertCircle, X, MoreVertical, Award, ShieldAlert, UserMinus, ArrowRightLeft,
   Folder, FolderOpen, User, ArrowUpDown, Pencil, Settings, UserPlus, ArrowUp, ArrowDown,
-  ChevronDown, ChevronsUpDown, Printer, Sparkles, Home, Loader2
+  ChevronDown, ChevronsUpDown, Printer, Sparkles, Home, Loader2, Upload
 } from 'lucide-react';
 import { Lembaga, Kelas, Santri, KategoriRombel, KelompokRombel, RombelAssignment, isDefaultClass, isEmisTerdaftar, getClsLembagaId, isGenderMatch } from '../../types';
 import { demoteSantriToCalonPesertaDidik, compressImage, parseCatatanInvalid, formatCatatanWithInvalid } from '../../lib/utils';
@@ -482,6 +482,7 @@ export default function LembagaKelasSub({
   const [lemNama, setLemNama] = useState('');
   const [lemKode, setLemKode] = useState('');
   const [lemLogo, setLemLogo] = useState('');
+  const [logoError, setLogoError] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [lemDeskripsi, setLemDeskripsi] = useState('');
   const [taMulaiTanggal, setTaMulaiTanggal] = useState<number>(1);
@@ -1051,6 +1052,7 @@ export default function LembagaKelasSub({
 
   const handleOpenLembagaModal = (lem: any = null) => {
     setIsUploadingLogo(false);
+    setLogoError(false);
     if (lem) {
       setEditingLembaga(lem);
       setLemNama(lem.nama);
@@ -3444,26 +3446,39 @@ export default function LembagaKelasSub({
                       <div className="flex flex-col gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                         <div className="flex items-center gap-4">
                           {isUploadingLogo ? (
-                            <div className="w-16 h-16 rounded-xl border border-slate-200 flex flex-col items-center justify-center bg-white text-emerald-600 shrink-0 shadow-2xs">
+                            <div className="w-16 h-16 rounded-2xl border border-slate-200 flex flex-col items-center justify-center bg-white text-emerald-600 shrink-0 shadow-2xs">
                               <Loader2 className="h-5 w-5 animate-spin mb-1" />
                               <span className="text-[8px] font-bold">UNGGAH...</span>
                             </div>
-                          ) : lemLogo ? (
-                            <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 shrink-0 shadow-sm bg-white group">
-                              <img src={getLogoUrl(lemLogo)} alt="Logo preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : lemLogo && !logoError ? (
+                            <div className="relative w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 shrink-0 shadow-xs bg-white group flex items-center justify-center">
+                              <img
+                                src={getLogoUrl(lemLogo)}
+                                alt="Logo"
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                                onError={() => setLogoError(true)}
+                              />
                               <button
                                 type="button"
-                                onClick={() => setLemLogo('')}
-                                className="absolute inset-0 bg-black/65 hover:bg-black/80 flex items-center justify-center text-white text-[10px] font-black tracking-wider transition-colors cursor-pointer"
+                                onClick={() => {
+                                  setLemLogo('');
+                                  setLogoError(false);
+                                }}
+                                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[9px] font-black tracking-wider cursor-pointer"
+                                title="Hapus Logo"
                               >
-                                HAPUS
+                                <Trash2 className="h-4 w-4 mb-0.5" />
+                                <span>HAPUS</span>
                               </button>
                             </div>
                           ) : (
-                            <div className="w-16 h-16 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center bg-white text-slate-300 shrink-0">
-                              <School className="h-6 w-6" />
+                            <div className="w-16 h-16 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center bg-white text-slate-300 shrink-0">
+                              <School className="h-6 w-6 text-slate-300" />
+                              {logoError && <span className="text-[8px] font-bold text-rose-400 mt-0.5">Gagal Muat</span>}
                             </div>
                           )}
+
                           <div className="flex-1">
                             <input
                               type="file"
@@ -3474,9 +3489,18 @@ export default function LembagaKelasSub({
                                 if (!file) return;
 
                                 setIsUploadingLogo(true);
+                                setLogoError(false);
                                 try {
                                   const compressedBase64 = await compressImage(file, 400, 400, 0.85);
-                                  const finalUrl = await uploadFileToStorage(compressedBase64, file.name, 'logo_lembaga');
+                                  let finalUrl = compressedBase64;
+                                  try {
+                                    const uploadedUrl = await uploadFileToStorage(compressedBase64, file.name, 'logo_lembaga');
+                                    if (uploadedUrl) {
+                                      finalUrl = uploadedUrl;
+                                    }
+                                  } catch (upErr) {
+                                    console.warn("Storage upload fallback to base64:", upErr);
+                                  }
                                   setLemLogo(finalUrl);
                                   showToast('Logo berhasil diproses.');
                                 } catch (err: any) {
@@ -3490,17 +3514,35 @@ export default function LembagaKelasSub({
                               className="hidden"
                               id="logo-upload-input"
                             />
-                            <label
-                              htmlFor="logo-upload-input"
-                              className={`inline-block bg-white hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer transition-colors border border-slate-200 shadow-sm ${isUploadingLogo ? 'opacity-50 pointer-events-none' : ''}`}
-                            >
-                              {isUploadingLogo ? 'MENGUNGGAH...' : lemLogo ? 'GANTI GAMBAR' : 'PILIH GAMBAR'}
-                            </label>
-                            <p className="text-[9px] text-slate-400 mt-1 font-medium">PNG, JPG (disimpan sebagai file fisik)</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <label
+                                htmlFor="logo-upload-input"
+                                className={`inline-flex items-center gap-1.5 bg-white hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer transition-colors border border-slate-200 shadow-xs ${isUploadingLogo ? 'opacity-50 pointer-events-none' : ''}`}
+                              >
+                                <Upload className="h-3 w-3 text-slate-500" />
+                                <span>{isUploadingLogo ? 'MENGUNGGAH...' : lemLogo ? 'GANTI GAMBAR' : 'PILIH GAMBAR'}</span>
+                              </label>
+
+                              {lemLogo && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLemLogo('');
+                                    setLogoError(false);
+                                  }}
+                                  className="inline-flex items-center gap-1 bg-rose-50 hover:bg-rose-100 text-rose-700 px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer transition-colors border border-rose-200"
+                                  title="Hapus Logo"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  <span>HAPUS LOGO</span>
+                                </button>
+                              )}
+                            </div>
+                            <p className="text-[9px] text-slate-400 mt-1 font-medium">PNG, JPG (disimpan otomatis)</p>
                           </div>
                         </div>
 
-                        {lemLogo && !isUploadingLogo && (
+                        {lemLogo && !isUploadingLogo && !logoError && (
                           <div className="mt-1 px-2.5 py-1.5 bg-emerald-50/80 border border-emerald-200/60 rounded-xl flex items-center gap-2">
                             <span className="text-[9px] font-bold text-emerald-800 shrink-0 uppercase tracking-wide">Path File:</span>
                             <code className="text-[10px] font-mono font-semibold text-emerald-900 truncate select-all">{getLogoUrl(lemLogo)}</code>
@@ -4134,7 +4176,7 @@ export default function LembagaKelasSub({
                               onClick={() => {
                                 setCollapsedModalSections(prev => ({ ...prev, [sec.key]: !prev[sec.key] }));
                               }}
-                              className="sticky top-0 z-10 px-2.5 py-1.5 bg-slate-100/95 backdrop-blur-xs border-y border-slate-200/90 rounded-lg flex items-center justify-between text-[11px] font-bold text-slate-700 shadow-2xs select-none cursor-pointer hover:bg-slate-200/80 transition-all"
+                              className="sticky top-0 z-30 px-2.5 py-1.5 bg-slate-100 border-y border-slate-200/90 rounded-lg flex items-center justify-between text-[11px] font-bold text-slate-700 shadow-2xs select-none cursor-pointer hover:bg-slate-200/80 transition-all"
                             >
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <div className="p-0.5 hover:bg-slate-200/80 rounded text-slate-500 transition-colors shrink-0">

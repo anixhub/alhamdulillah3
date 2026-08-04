@@ -177,19 +177,15 @@ export const isCustomPasFoto = (url: string | undefined | null): boolean => {
   return true;
 };
 
-export const renderSantriAvatar = (s: Santri, className: string = "h-10 w-10 text-xs", isRect: boolean = false) => {
-  if (isCustomPasFoto(s.filePasFoto)) {
-    return (
-      <img 
-        src={s.filePasFoto} 
-        className={`${className} object-cover`}
-        alt={s.nama || 'Santri'}
-        referrerPolicy="no-referrer"
-      />
-    );
-  }
-
-  const isPutri = s.gender === 'Putri';
+export const renderSantriAvatar = (
+  s: Santri, 
+  className: string = "h-10 w-10 text-xs", 
+  isRect: boolean = false,
+  showAgeBadge: boolean = true
+) => {
+  const age = calculateRealtimeAge(s?.tanggalLahir);
+  const displayAge = age !== null && age !== undefined ? age : '-';
+  const isPutri = s?.gender === 'Putri';
   const bgColor = isPutri ? 'bg-pink-500 text-white' : 'bg-[#00b0f0] text-white';
   
   const getInitials = (name: string): string => {
@@ -202,10 +198,47 @@ export const renderSantriAvatar = (s: Santri, className: string = "h-10 w-10 tex
   };
 
   const roundedClass = isRect ? "rounded-xl" : "rounded-full";
+  const hasPhoto = isCustomPasFoto(s?.filePasFoto);
+
+  if (!showAgeBadge) {
+    if (hasPhoto) {
+      return (
+        <img 
+          src={s.filePasFoto} 
+          className={`${className} object-cover ${roundedClass}`}
+          alt={s?.nama || 'Santri'}
+          referrerPolicy="no-referrer"
+        />
+      );
+    }
+    return (
+      <div className={`${className} flex items-center justify-center font-sans font-extrabold select-none ${roundedClass} shrink-0 ${bgColor}`}>
+        <span className="text-[11px] leading-none uppercase">{getInitials(s?.nama || '')}</span>
+      </div>
+    );
+  }
 
   return (
-    <div className={`${className} flex items-center justify-center font-sans font-extrabold select-none ${roundedClass} shrink-0 ${bgColor}`}>
-      <span className="text-[11px] leading-none uppercase">{getInitials(s.nama)}</span>
+    <div className={`relative inline-flex shrink-0 items-center justify-center ${className}`}>
+      <div className={`w-full h-full ${roundedClass} overflow-hidden flex items-center justify-center font-sans font-extrabold select-none ${hasPhoto ? '' : bgColor}`}>
+        {hasPhoto ? (
+          <img 
+            src={s.filePasFoto} 
+            className="w-full h-full object-cover"
+            alt={s?.nama || 'Santri'}
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <span className="text-[11px] leading-none uppercase">{getInitials(s?.nama || '')}</span>
+        )}
+      </div>
+
+      <div 
+        className="absolute -bottom-0.5 -left-0.5 min-w-[16px] h-[16px] px-0.5 rounded-full bg-emerald-600 border-[1.5px] border-white text-white font-black text-[8.5px] flex items-center justify-center shadow-xs z-[2] leading-none select-none"
+        title={`Umur: ${displayAge} Tahun`}
+      >
+        {displayAge}
+      </div>
     </div>
   );
 };

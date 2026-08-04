@@ -474,23 +474,36 @@ export default function SantriCardView({
             )}
 
             {/* Photo Section */}
-            <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full overflow-hidden border border-slate-200/80 shadow-xs bg-slate-50 flex-shrink-0 flex items-center justify-center">
-              {hasUploadedPhoto ? (
-                <img 
-                  src={s.filePasFoto} 
-                  className="w-full h-full object-cover" 
-                  alt={s.nama} 
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className={`w-full h-full flex items-center justify-center font-sans font-extrabold text-2xl sm:text-3xl text-white ${genderBgColor}`}>
-                  {getInitials(s.nama)}
-                </div>
-              )}
+            <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full border border-slate-200/80 shadow-xs bg-slate-50 flex-shrink-0 flex items-center justify-center">
+              <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center">
+                {hasUploadedPhoto ? (
+                  <img 
+                    src={s.filePasFoto} 
+                    className="w-full h-full object-cover" 
+                    alt={s.nama} 
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className={`w-full h-full flex items-center justify-center font-sans font-extrabold text-2xl sm:text-3xl text-white ${genderBgColor}`}>
+                    {getInitials(s.nama)}
+                  </div>
+                )}
+              </div>
               {/* Selection blue overlay tint matching Image 2 reference exactly */}
               {isSelectionMode && isSelected && (
-                <div className="absolute inset-0 bg-[#00b0f0]/30 mix-blend-multiply pointer-events-none" />
+                <div className="absolute inset-0 rounded-full bg-[#00b0f0]/30 mix-blend-multiply pointer-events-none" />
               )}
+
+              {/* Age Label in bottom-left corner of profile photo */}
+              {(() => {
+                const age = calculateAgeOnDate(s.tanggalLahir, new Date());
+                if (age === null || age === undefined) return null;
+                return (
+                  <span className="absolute bottom-0 left-0 bg-slate-900/85 text-white font-extrabold text-[10px] sm:text-xs px-2.5 py-0.5 rounded-full border-2 border-white shadow-md z-10 flex items-center justify-center whitespace-nowrap">
+                    {age} Thn
+                  </span>
+                );
+              })()}
             </div>
 
             {/* Content Section */}

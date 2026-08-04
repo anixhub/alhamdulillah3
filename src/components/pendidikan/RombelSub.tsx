@@ -2502,7 +2502,7 @@ export default function RombelSub({
                                 onClick={() => {
                                   setCollapsedModalSections(prev => ({ ...prev, [section.key]: !prev[section.key] }));
                                 }}
-                                className="sticky top-0 z-10 px-2.5 py-1.5 bg-slate-100/95 backdrop-blur-xs border-y border-slate-200/90 rounded-lg flex items-center justify-between text-[11px] font-bold text-slate-700 shadow-2xs select-none cursor-pointer hover:bg-slate-200/80 transition-all"
+                                className="sticky top-0 z-30 px-2.5 py-1.5 bg-slate-100 border-y border-slate-200/90 rounded-lg flex items-center justify-between text-[11px] font-bold text-slate-700 shadow-2xs select-none cursor-pointer hover:bg-slate-200/80 transition-all"
                               >
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   <div className="p-0.5 hover:bg-slate-200/80 rounded text-slate-500 transition-colors shrink-0">

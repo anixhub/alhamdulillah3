@@ -26,7 +26,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { Santri, BendaharaRecord, KeamananRecord, Kamar, Kompleks, Kelas, Lembaga, KelompokRombel, RombelAssignment, KategoriRombel } from '../../types';
-import { renderSantriAvatar, isCustomPasFoto } from '../SekretarisHelper';
+import { renderSantriAvatar, isCustomPasFoto, calculateRealtimeAge } from '../SekretarisHelper';
 import { uploadFileToStorage, updateTableRow } from '../../lib/api';
 import { processUploadedFile } from '../../lib/utils';
 
@@ -492,8 +492,19 @@ export default function SantriDetailModal({ selectedSantri, onClose, onUpdateSan
             {/* Profile Row */}
             <div className="flex items-center gap-4 sm:gap-5">
               {/* Profile Avatar Frame (Circular exactly like image) */}
-              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border border-slate-200 shrink-0 shadow-inner bg-slate-50 flex items-center justify-center">
-                {renderSantriAvatar(localSantri, "w-full h-full object-cover", false)}
+              <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-full border border-slate-200 shrink-0 shadow-inner bg-slate-50 flex items-center justify-center">
+                <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center">
+                  {renderSantriAvatar(localSantri, "w-full h-full object-cover", false, false)}
+                </div>
+                {(() => {
+                  const age = calculateRealtimeAge(localSantri.tanggalLahir);
+                  if (age === null || age === undefined) return null;
+                  return (
+                    <span className="absolute bottom-0 left-0 bg-slate-900/85 text-white font-extrabold text-[10px] sm:text-xs px-2 py-0.5 rounded-full border-2 border-white shadow-md z-10 flex items-center justify-center whitespace-nowrap">
+                      {age} Thn
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* Badges, Name, Details */}

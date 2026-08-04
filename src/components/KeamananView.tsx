@@ -7601,67 +7601,64 @@ export default function KeamananView({
                         const nextKaliLevel = highestSequentialKali + 1;
 
                         return (
-                          <div className="space-y-4">
-                            {/* Sequential Rule Boxes (List Container) */}
-                            <div className="space-y-3 border border-slate-200/80 bg-slate-50/50 p-2.5 rounded-2xl">
-                              {sequentialRules.map((rule) => (
-                                <div key={rule.id} className="p-4 bg-white border border-slate-200 rounded-xl space-y-3 shadow-2xs">
-                                  <div className="flex items-center justify-between">
-                                    <h5 className="text-[11px] font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
-                                      <span className="h-5 w-5 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-xs">
-                                        {rule.kaliKe}
-                                      </span>
-                                      <span>PENGULANGAN KE-{rule.kaliKe}</span>
-                                    </h5>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeRepetitionRule(rule.id)}
-                                      className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer transition-all select-none flex items-center justify-center rounded-lg hover:bg-rose-50 sm:p-0 sm:hover:bg-transparent"
-                                      title="Hapus Repetisi"
-                                    >
-                                      <span className="hidden sm:inline text-[10px] font-bold">Hapus Repetisi</span>
-                                      <Trash2 className="h-4 w-4 sm:hidden" />
-                                    </button>
-                                  </div>
+                          <div className="space-y-3">
+                            {/* Sequential Rule Boxes (rendered parallel with Pelanggaran Pertama) */}
+                            {sequentialRules.map((rule) => (
+                              <div key={rule.id} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <h5 className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span className="h-5 w-5 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-xs shrink-0">
+                                      {rule.kaliKe}
+                                    </span>
+                                    <span>PENGULANGAN KE-{rule.kaliKe}</span>
+                                  </h5>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeRepetitionRule(rule.id)}
+                                    className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100/80 rounded-xl cursor-pointer transition-all select-none flex items-center justify-center"
+                                    title="Hapus Repetisi"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
 
-                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                    <div className="sm:col-span-1">
-                                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
-                                        POIN PELANGGARAN
-                                      </label>
-                                      <input
-                                        type="number"
-                                        required
-                                        min="0"
-                                        value={rule.poin}
-                                        onChange={(e) => updateRuleValue(rule.kaliKe, 'poin', Number(e.target.value))}
-                                        className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                                      />
-                                    </div>
-                                    <div className="sm:col-span-2">
-                                      <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
-                                        SANKSI TA'ZIR
-                                      </label>
-                                      <input
-                                        type="text"
-                                        required
-                                        placeholder={`Sanksi ta'zir khusus untuk pengulangan ke-${rule.kaliKe}...`}
-                                        value={rule.tazir}
-                                        onChange={(e) => updateRuleValue(rule.kaliKe, 'tazir', e.target.value)}
-                                        className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                                      />
-                                    </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                  <div className="sm:col-span-1">
+                                    <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                                      POIN PELANGGARAN
+                                    </label>
+                                    <input
+                                      type="number"
+                                      required
+                                      min="0"
+                                      value={rule.poin}
+                                      onChange={(e) => updateRuleValue(rule.kaliKe, 'poin', Number(e.target.value))}
+                                      className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-2">
+                                    <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                                      SANKSI TA'ZIR
+                                    </label>
+                                    <input
+                                      type="text"
+                                      required
+                                      placeholder={`Sanksi ta'zir khusus untuk pengulangan ke-${rule.kaliKe}...`}
+                                      value={rule.tazir}
+                                      onChange={(e) => updateRuleValue(rule.kaliKe, 'tazir', e.target.value)}
+                                      className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                    />
                                   </div>
                                 </div>
-                              ))}
-                            </div>
+                              </div>
+                            ))}
 
                             {/* Control button to add more sequential rules */}
-                            <div className="flex justify-center pt-1.5 border-t border-slate-100">
+                            <div className="flex justify-center pt-1">
                               <button
                                 type="button"
                                 onClick={addRepetitionRule}
-                                className="w-full sm:w-auto justify-center inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-950 border border-indigo-200 rounded-xl text-[10px] font-extrabold transition-all cursor-pointer select-none"
+                                className="w-full sm:w-auto justify-center inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-950 border border-indigo-200/80 rounded-xl text-xs font-bold transition-all cursor-pointer select-none"
                               >
                                 <Plus className="h-3.5 w-3.5" />
                                 <span>Tambah aturan repetisi</span>

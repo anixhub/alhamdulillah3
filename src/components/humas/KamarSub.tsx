@@ -663,6 +663,46 @@ export default function KamarSub({
     showToast(`${Math.min(shuffledMembers.length, shuffledSlots.length)} santri tanpa lemari berhasil ditempatkan di lemari kosong.`);
   };
 
+  const handleDistributeUnassigned = (unassigned: Santri[]) => {
+    if (!activeRoomForDetail || unassigned.length === 0) return;
+    const roomCapacity = activeRoomForDetail.kapasitas || 15;
+    if (roomCapacity <= 0) return;
+
+    const currentMembers = getMembersOfRoom(activeRoomForDetail.nama);
+
+    // Count occupants per locker slot 1..roomCapacity
+    const slotCounts: Record<number, number> = {};
+    for (let i = 1; i <= roomCapacity; i++) {
+      slotCounts[i] = 0;
+    }
+
+    currentMembers.forEach(s => {
+      const num = parseInt(s.nomorLemari || '0', 10);
+      if (!isNaN(num) && num >= 1 && num <= roomCapacity) {
+        slotCounts[num] = (slotCounts[num] || 0) + 1;
+      }
+    });
+
+    // Assign each unassigned student to the slot with minimum occupants (sequentially from top)
+    unassigned.forEach(student => {
+      let minCount = Infinity;
+      let bestSlot = 1;
+
+      for (let slot = 1; slot <= roomCapacity; slot++) {
+        const count = slotCounts[slot] || 0;
+        if (count < minCount) {
+          minCount = count;
+          bestSlot = slot;
+        }
+      }
+
+      slotCounts[bestSlot] = (slotCounts[bestSlot] || 0) + 1;
+      onUpdateSantriRoom(student.id, activeRoomForDetail.nama, String(bestSlot));
+    });
+
+    showToast(`${unassigned.length} santri berhasil didistribusikan ke lemari secara merata.`);
+  };
+
   const handleKosongkanSemuaLemari = () => {
     setIsAcakDropdownOpen(false);
     if (!activeRoomForDetail) return;
@@ -1895,14 +1935,26 @@ export default function KamarSub({
                     {/* Unassigned Students Bar if any */}
                     {unassignedMembers.length > 0 && (
                       <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200/80 space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
                           <span className="text-xs font-extrabold text-amber-900 flex items-center gap-1.5">
                             <AlertCircle className="w-4 h-4 text-amber-600" />
                             Belum Dapat Lemari ({unassignedMembers.length})
                           </span>
-                          <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                            Tarik ke slot lemari di bawah
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {canWriteCurrent && (
+                              <button
+                                type="button"
+                                onClick={() => handleDistributeUnassigned(unassignedMembers)}
+                                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-extrabold text-[11px] rounded-xl flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>Distribusikan</span>
+                              </button>
+                            )}
+                            <span className="hidden sm:inline-block text-[10px] font-bold text-amber-700 bg-amber-100/90 px-2.5 py-1 rounded-full">
+                              Tarik ke slot lemari di bawah
+                            </span>
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-2 pt-1">
                           {unassignedMembers.map(s => (
@@ -2578,7 +2630,7 @@ export default function KamarSub({
                                         : [...prev, roomKey]
                                     );
                                   }}
-                                  className="sticky top-0 z-10 bg-slate-100/90 hover:bg-slate-200/80 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-slate-200/80 flex items-center justify-between text-[11px] font-extrabold text-slate-700 shadow-3xs cursor-pointer transition-colors select-none"
+                                  className="sticky top-0 z-30 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1 rounded-lg border border-slate-200/80 flex items-center justify-between text-[11px] font-extrabold text-slate-700 shadow-3xs cursor-pointer transition-colors select-none"
                                 >
                                   <span className="flex items-center gap-1.5">
                                     {isCollapsed ? (
@@ -2747,7 +2799,7 @@ export default function KamarSub({
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
                   <ArrowLeftRight className="w-4 h-4 text-purple-600" />
-                  {singleTransferStudent ? `Pindahkan ${singleTransferStudent.nama}` : `Pindahkan ${selectedStudentIds.length} Santri`}
+                  {singleTransferStudent ? `Pindahkan Santri` : `Pindahkan ${selectedStudentIds.length} Santri`}
                 </h3>
                 <button 
                   onClick={() => {
@@ -2759,6 +2811,19 @@ export default function KamarSub({
                   <X className="w-4 h-4" />
                 </button>
               </div>
+
+              {singleTransferStudent && (
+                <div className="p-3 bg-purple-50/60 border border-purple-100/80 rounded-2xl flex items-center gap-3">
+                  {renderSantriAvatar(singleTransferStudent, "w-10 h-10 rounded-full border border-purple-200 text-xs font-bold shrink-0", false, true)}
+                  <div className="min-w-0">
+                    <p className="text-xs font-extrabold text-slate-800 truncate">{singleTransferStudent.nama}</p>
+                    <p className="text-[10px] text-slate-500 font-semibold truncate">
+                      Kamar: <span className="font-bold text-purple-700">{singleTransferStudent.kamar || activeRoomForDetail?.nama || 'Belum Ada'}</span>
+                      {singleTransferStudent.nomorLemari ? ` &bull; Lemari ${String(singleTransferStudent.nomorLemari).padStart(2, '0')}` : ''}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-3">
                 <div>
@@ -2870,22 +2935,20 @@ export default function KamarSub({
               className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl space-y-4"
             >
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-2xl bg-purple-50 text-purple-700 border border-purple-100">
-                    <DoorClosed className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-extrabold text-slate-800">
-                      Pindah Lemari Santri
+                <div className="flex items-center gap-3">
+                  {renderSantriAvatar(editingLemariStudent, "w-10 h-10 rounded-full border border-purple-200 text-xs font-bold shrink-0", false, true)}
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-extrabold text-slate-800 truncate">
+                      {editingLemariStudent.nama}
                     </h3>
-                    <p className="text-[11px] font-semibold text-slate-500">
-                      {editingLemariStudent.nama} &bull; {editingLemariStudent.kamar || activeRoomForDetail?.nama || '-'}
+                    <p className="text-[11px] font-semibold text-slate-500 truncate">
+                      Pindah Lemari &bull; {editingLemariStudent.kamar || activeRoomForDetail?.nama || '-'}
                     </p>
                   </div>
                 </div>
                 <button 
                   onClick={() => setEditingLemariStudent(null)} 
-                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors shrink-0"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -3110,19 +3173,9 @@ export default function KamarSub({
                           );
                         }
                       }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-800 font-medium transition-colors cursor-pointer"
                     >
                       {isKetua ? 'Copot Ketua' : 'Jadikan Ketua'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setMenuDropdown(null);
-                        setIsSelectionMode(true);
-                        setSelectedStudentIds([s.id]);
-                      }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-purple-50 text-purple-700 transition-colors cursor-pointer"
-                    >
-                      Pilih
                     </button>
                     <button
                       onClick={() => {
@@ -3132,7 +3185,7 @@ export default function KamarSub({
                         setSingleDestRoomId(activeRoomForDetail?.id || '');
                         setSingleNomorLemari(s.nomorLemari || '');
                       }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-800 font-medium transition-colors cursor-pointer"
                     >
                       Pindah Kamar
                     </button>
@@ -3142,7 +3195,7 @@ export default function KamarSub({
                         setEditingLemariStudent(s);
                         setTempLemariValue(s.nomorLemari || '');
                       }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-800 font-medium transition-colors cursor-pointer"
                     >
                       Pindah Lemari
                     </button>
@@ -3160,7 +3213,7 @@ export default function KamarSub({
                           }
                         );
                       }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-amber-50 text-amber-700 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-800 font-medium transition-colors cursor-pointer"
                     >
                       Hapus Lemari
                     </button>
@@ -3170,7 +3223,7 @@ export default function KamarSub({
                         const slotNum = parseInt(s.nomorLemari || '0', 10);
                         handleOpenAddMemberModal(slotNum > 0 ? slotNum : undefined);
                       }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-purple-50 text-purple-700 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-800 font-medium transition-colors cursor-pointer"
                     >
                       Tambah Pengguna
                     </button>
