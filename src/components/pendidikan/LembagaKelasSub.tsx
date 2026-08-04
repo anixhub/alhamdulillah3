@@ -480,6 +480,7 @@ export default function LembagaKelasSub({
   const [isLembagaModalOpen, setIsLembagaModalOpen] = useState(false);
   const [editingLembaga, setEditingLembaga] = useState<any | null>(null);
   const [lemNama, setLemNama] = useState('');
+  const [lemKode, setLemKode] = useState('');
   const [lemLogo, setLemLogo] = useState('');
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [lemDeskripsi, setLemDeskripsi] = useState('');
@@ -789,39 +790,28 @@ export default function LembagaKelasSub({
         const targetNorm = norm(targetClass.nama);
         if (!targetNorm) return false;
 
-        // 1. Direct match in sClasses
-        if (sClasses.includes(targetNorm)) return true;
+        const cleanClassStr = (str?: string | null) => {
+          if (!str) return '';
+          return str.trim().toLowerCase()
+            .replace(/[-_]/g, ' ')
+            .replace(/^(kelas|kls)\s+/, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        };
 
-        // 2. Direct match in specificClassText
-        if (specificClassText && (
-          specificClassText === targetNorm ||
-          specificClassText.includes(targetNorm) ||
-          targetNorm.includes(specificClassText)
-        )) {
+        const cleanedTarget = cleanClassStr(targetNorm);
+
+        // 1. Direct match in sClasses (exact norm or cleaned match)
+        if (sClasses.some(sc => sc === targetNorm || cleanClassStr(sc) === cleanedTarget)) {
           return true;
         }
 
-        // 3. Number/digit match (e.g., "kelas 1" vs "1")
-        const targetDigits = targetNorm.replace(/\D/g, '');
-        if (targetDigits) {
-          const targetLetters = targetNorm.replace(/[^a-z]/gi, '');
-          for (const sc of sClasses) {
-            const scDigits = sc.replace(/\D/g, '');
-            const scLetters = sc.replace(/[^a-z]/gi, '');
-            if (scDigits === targetDigits) {
-              if (!targetLetters || !scLetters || scLetters.includes(targetLetters) || targetLetters.includes(scLetters) || scLetters === 'kelas' || targetLetters === 'kelas') {
-                return true;
-              }
-            }
-          }
-          if (specificClassText && specificClassText.replace(/\D/g, '') === targetDigits) {
+        // 2. Direct match in specificClassText (exact norm or cleaned match)
+        if (specificClassText) {
+          const cleanedSpecific = cleanClassStr(specificClassText);
+          if (specificClassText === targetNorm || cleanedSpecific === cleanedTarget) {
             return true;
           }
-        }
-
-        // 4. Substring match in sClasses
-        if (sClasses.some(sc => sc === targetNorm || (targetNorm.length > 2 && (sc.includes(targetNorm) || targetNorm.includes(sc))))) {
-          return true;
         }
 
         return false;
@@ -1042,11 +1032,29 @@ export default function LembagaKelasSub({
   }, [selectedKelas]);
 
   // --- CRUD Handlers ---
+  const generate4LetterKode = (name: string): string => {
+    const clean = name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+    if (!clean) return 'LEMB';
+    const words = clean.split(/\s+/).filter(Boolean);
+    let code = '';
+    if (words.length >= 4) {
+      code = words.slice(0, 4).map(w => w[0]).join('');
+    } else if (words.length === 3) {
+      code = (words[0][0] + words[1][0] + words[2].slice(0, 2));
+    } else if (words.length === 2) {
+      code = (words[0].slice(0, 2) + words[1].slice(0, 2));
+    } else {
+      code = clean.slice(0, 4);
+    }
+    return code.toUpperCase().padEnd(4, 'X').slice(0, 4);
+  };
+
   const handleOpenLembagaModal = (lem: any = null) => {
     setIsUploadingLogo(false);
     if (lem) {
       setEditingLembaga(lem);
       setLemNama(lem.nama);
+      setLemKode((lem.kode || '').toUpperCase().slice(0, 4));
       setLemLogo(lem.logo || '');
       setLemDeskripsi(lem.deskripsi || '');
       setTaMulaiTanggal(lem.taMulaiTanggal || 1);
@@ -1056,6 +1064,7 @@ export default function LembagaKelasSub({
     } else {
       setEditingLembaga(null);
       setLemNama('');
+      setLemKode('');
       setLemLogo('');
       setLemDeskripsi('');
       setTaMulaiTanggal(1);
@@ -1099,20 +1108,28 @@ export default function LembagaKelasSub({
         }
       }
     } else {
-      const generateInitials = (name: string) => {
-        const clean = name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-        const parts = clean.split(/\s+/).filter(Boolean);
-        if (parts.length >= 2) {
-          return parts.map(p => p[0]).join('').toUpperCase().slice(0, 5);
-        }
-        return clean.slice(0, 3).toUpperCase();
-      };
+      let finalKode = lemKode.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4);
+      if (!finalKode) {
+        finalKode = generate4LetterKode(lemNama);
+      }
+
+      // Unique kode validation (cannot have duplicate kode across lembagas)
+      const isDuplicateKode = lembagasList.some(l => {
+        if (editingLembaga && String(l.id) === String(editingLembaga.id)) return false;
+        return (l.kode || '').trim().toUpperCase() === finalKode;
+      });
+
+      if (isDuplicateKode) {
+        showToast(`Kode singkatan "${finalKode}" sudah digunakan oleh lembaga lain. Gunakan kode yang berbeda.`, 'error');
+        return;
+      }
 
       if (editingLembaga) {
         const { classesCount, studentsCount, ...cleanLembaga } = editingLembaga;
         await onUpdateLembaga({
           ...cleanLembaga,
           nama: lemNama.trim(),
+          kode: finalKode,
           logo: lemLogo || undefined,
           deskripsi: lemDeskripsi.trim(),
           taMulaiTanggal,
@@ -1125,6 +1142,7 @@ export default function LembagaKelasSub({
           setSelectedLembaga({
             ...selectedLembaga,
             nama: lemNama.trim(),
+            kode: finalKode,
             logo: lemLogo || undefined,
             deskripsi: lemDeskripsi.trim(),
             taMulaiTanggal,
@@ -1135,19 +1153,11 @@ export default function LembagaKelasSub({
         }
       } else {
         const newLembagaId = 'L-' + Date.now();
-        let autoKode = generateInitials(lemNama) || 'LEM';
-        
-        let baseKode = autoKode;
-        let counter = 1;
-        while (lembagasList.some(l => l.kode === autoKode && l.gender === selectedGender)) {
-          autoKode = `${baseKode}${counter}`;
-          counter++;
-        }
 
         const savedLem = await onAddLembaga({
           id: newLembagaId,
           nama: lemNama.trim(),
-          kode: autoKode,
+          kode: finalKode,
           gender: selectedGender,
           jenis: activeTab,
           logo: lemLogo || undefined,
@@ -1342,6 +1352,39 @@ export default function LembagaKelasSub({
     setConfirmRemoveOpen(true);
   };
 
+  const handleBulkRemoveStudentsFromClass = () => {
+    if (!selectedKelas || selectedStudentIds.length === 0) return;
+    const label = activeTab === 'Rombel' ? 'kelompok' : 'kelas';
+    const count = selectedStudentIds.length;
+    setConfirmRemoveData({
+      type: 'bulk',
+      count,
+      label,
+      className: selectedKelas.nama,
+      onConfirm: () => {
+        if (activeTab === 'Rombel') {
+          if (onRemoveAssignment) {
+            selectedStudentIds.forEach(studentId => {
+              onRemoveAssignment(studentId, selectedKelas.id);
+            });
+            showToast(`${count} santri berhasil dikeluarkan dari kelompok.`);
+          }
+        } else {
+          const isCalonPelajar = selectedKelas && isDefaultClass(selectedKelas);
+          onUpdateSantriClassBatch(selectedStudentIds, 'Tanpa Kelas', selectedLembaga.id);
+          if (isCalonPelajar) {
+            showToast(`${count} santri berhasil dikeluarkan dari lembaga.`);
+          } else {
+            showToast(`${count} santri berhasil dikeluarkan dari kelas.`);
+          }
+        }
+        setSelectedStudentIds([]);
+        setIsSelectionMode(false);
+      }
+    });
+    setConfirmRemoveOpen(true);
+  };
+
   const handleExecuteTransfer = () => {
     if (!transferStudent || !destClassId || !selectedKelas) return;
     const targetLemId = transferLembagaId || selectedLembaga.id;
@@ -1420,6 +1463,12 @@ export default function LembagaKelasSub({
   // Helper: Get formal institution and class section for a student
   const getFormalSectionForStudent = (s: Santri): { key: string; label: string } => {
     const matchingLembagas = lembagasList.filter(l => getLembagaJenis(l) === 'Formal' && isGenderMatch(l.gender, selectedGender));
+    
+    const getKodeBadge = (lem: Lembaga) => {
+      const k = (lem.kode || generate4LetterKode(lem.nama)).toUpperCase().slice(0, 4);
+      return `[${k}]`;
+    };
+
     const l = matchingLembagas.find(lem => isStudentInLembaga(s, lem));
     if (!l) {
       return { key: 'Belum', label: 'Belum Tergabung' };
@@ -1432,12 +1481,12 @@ export default function LembagaKelasSub({
     });
 
     if (c) {
-      return { key: `${l.id}:${c.id}`, label: `${l.kode || l.nama} : ${c.nama}` };
+      return { key: `${l.id}:${c.id}`, label: `${getKodeBadge(l)} ${c.nama}` };
     }
 
     const defaultC = classes.find(isDefaultClass) || classes[0];
     if (defaultC) {
-      return { key: `${l.id}:${defaultC.id}`, label: `${l.kode || l.nama} : ${defaultC.nama}` };
+      return { key: `${l.id}:${defaultC.id}`, label: `${getKodeBadge(l)} ${defaultC.nama}` };
     }
 
     return { key: 'Belum', label: 'Belum Tergabung' };
@@ -1448,12 +1497,13 @@ export default function LembagaKelasSub({
     const matchingLembagas = lembagasList.filter(l => getLembagaJenis(l) === 'Formal' && isGenderMatch(l.gender, selectedGender));
     matchingLembagas.forEach(l => {
       const classes = getClassesOfLembaga(l.id);
+      const kodeBadge = `[${(l.kode || generate4LetterKode(l.nama)).toUpperCase().slice(0, 4)}]`;
       classes.forEach(c => {
         if (selectedLembaga && selectedKelas && String(l.id) === String(selectedLembaga.id) && String(c.id) === String(selectedKelas.id)) {
           return; // Exclude target class being added to
         }
         const key = `${l.id}:${c.id}`;
-        const label = `${l.kode || l.nama} : ${c.nama}`;
+        const label = `${kodeBadge} ${c.nama}`;
         formalSectionsMap[key] = label;
       });
     });
@@ -2017,7 +2067,11 @@ export default function LembagaKelasSub({
               </span>
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              Pengelolaan Satuan Pendidikan Internal Pondok dan Rombongan Belajar Santri secara terpadu.
+              {activeTab === 'Formal'
+                ? 'Pengelolaan Satuan Pendidikan Formal, Lembaga, dan Kelas Santri secara terpadu.'
+                : activeTab === 'Rombel'
+                ? 'Pengelolaan Kategori Rombel, Kelompok Belajar, dan Penugasan Santri secara terpadu.'
+                : 'Pengelolaan Satuan Pendidikan Internal Pondok dan Rombongan Belajar Santri secara terpadu.'}
             </p>
           </div>
         </div>
@@ -2258,7 +2312,9 @@ export default function LembagaKelasSub({
                   </button>
 
                   <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-widest text-center px-10 leading-none">
-                    {activeTab === 'Rombel'
+                    {activeTab === 'Formal'
+                      ? 'Pendidikan Formal'
+                      : activeTab === 'Rombel'
                       ? 'Rombongan Belajar'
                       : 'Pendidikan Internal Pondok'}
                   </span>
@@ -2296,10 +2352,15 @@ export default function LembagaKelasSub({
                     )}
                   </div>
 
-                  {/* Institution Name */}
-                  <h2 className="text-xl font-black text-slate-800 tracking-tight leading-tight uppercase px-2 truncate w-full">
-                    {selectedLembaga.nama}
-                  </h2>
+                  {/* Institution Name & 4-letter Kode Badge */}
+                  <div className="flex items-center justify-center gap-2 max-w-full px-2">
+                    <h2 className="text-xl font-black text-slate-800 tracking-tight leading-tight uppercase truncate">
+                      {selectedLembaga.nama}
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-black uppercase tracking-wider border border-emerald-200/80 shrink-0 shadow-2xs">
+                      {(selectedLembaga.kode || generate4LetterKode(selectedLembaga.nama)).toUpperCase().slice(0, 4)}
+                    </span>
+                  </div>
                   
                   {/* Stats */}
                   <p className="text-[11px] font-extrabold text-slate-400 mt-1 uppercase tracking-wider">
@@ -2771,16 +2832,24 @@ export default function LembagaKelasSub({
                               setBulkTransferLembagaId(selectedLembaga.id);
                               setBulkDestClassId('');
                             }}
-                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs transition-all cursor-pointer"
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs transition-all cursor-pointer flex items-center gap-1.5"
                           >
-                            Pindah Masal
+                            <ArrowRightLeft className="h-3.5 w-3.5" />
+                            <span>Pindah Masal</span>
+                          </button>
+                          <button
+                            onClick={handleBulkRemoveStudentsFromClass}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 shadow-2xs transition-all cursor-pointer flex items-center gap-1.5"
+                          >
+                            <UserMinus className="h-3.5 w-3.5" />
+                            <span>Keluarkan Masal</span>
                           </button>
                           <button
                             onClick={() => {
                               setSelectedStudentIds([]);
                               setIsSelectionMode(false);
                             }}
-                            className="px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-all"
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-all cursor-pointer"
                           >
                             Batal
                           </button>
@@ -3319,6 +3388,26 @@ export default function LembagaKelasSub({
                     className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-emerald-500 outline-none font-semibold text-slate-700"
                   />
                 </div>
+
+                {activeTab !== 'Rombel' && (
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                      <span>Kode Singkatan Lembaga (Maksimal 4 Huruf)</span>
+                      <span className="text-[9px] text-slate-400 font-medium">Harus Unik (Contoh: SPMU, MAAT)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={lemKode}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4);
+                        setLemKode(val);
+                      }}
+                      maxLength={4}
+                      placeholder="Contoh: SPMU"
+                      className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-emerald-500 outline-none font-black tracking-widest uppercase text-slate-800"
+                    />
+                  </div>
+                )}
 
                 {activeTab === 'Rombel' ? (
                   <div>
@@ -4103,21 +4192,16 @@ export default function LembagaKelasSub({
                                       : 'border-slate-100 bg-white hover:border-emerald-200 hover:bg-emerald-50/30'
                                   }`}
                                 >
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    <div className={`h-4 w-4 rounded border flex items-center justify-center transition-all shrink-0 ${
-                                      isChecked
-                                        ? 'bg-emerald-600 border-emerald-600 text-white'
-                                        : 'border-slate-300 bg-white'
-                                    }`}>
-                                      {isChecked && <CheckSquare className="h-2.5 w-2.5 stroke-[3px]" />}
-                                    </div>
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                                     {renderStudentAvatar(student)}
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex-1">
                                       <p className="font-semibold text-slate-800 truncate group-hover:text-emerald-900">{student.nama}</p>
-                                      <p className="text-[10px] text-slate-500 font-medium mt-0.5 truncate">
+                                      <p className="text-[10px] text-slate-500 font-medium truncate mt-0.5">
                                         {[student.desa, student.kecamatan, student.kabupaten].filter(Boolean).map(x => x!.trim()).join(', ') || student.alamat || student.asal || '-'}
-                                        <span className="mx-1 text-slate-300">|</span>
-                                        <span className={sec.key !== 'Belum' ? 'text-amber-700 font-bold' : 'text-slate-400 font-normal'}>
+                                      </p>
+                                      <p className="text-[10px] font-semibold mt-0.5 truncate flex items-center gap-1">
+                                        <span className="text-slate-400 font-medium">Kelas saat ini:</span>
+                                        <span className={sec.key !== 'Belum' ? 'text-amber-800 font-bold bg-amber-50/80 px-1.5 py-0.2 rounded border border-amber-200/60' : 'text-slate-400 font-medium'}>
                                           {sec.label}
                                         </span>
                                       </p>
