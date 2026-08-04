@@ -5,7 +5,7 @@ import {
   ArrowLeft, Search, Check, CheckCircle2, AlertCircle, X, MoreVertical, Award,
   Folder, FolderOpen, User, ArrowUpDown, Pencil, Settings, UserPlus, ArrowUp, ArrowDown,
   ChevronDown, Printer, Sparkles, UserCheck, ShieldAlert, UserMinus, ArrowLeftRight,
-  Download, Eye, Sliders, Hash, FileSpreadsheet, ListOrdered, Shuffle, Crown
+  Download, Eye, Sliders, Hash, FileSpreadsheet, ListOrdered, Shuffle, Crown, DoorClosed, CheckSquare
 } from 'lucide-react';
 import { Kompleks, Kamar, Santri } from '../../types';
 import SantriDetailModal from '../sekretaris/SantriDetailModal';
@@ -77,7 +77,6 @@ export default function KamarSub({
   // Drag and drop
   const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
-  const [dragOverTopSlot, setDragOverTopSlot] = useState<number | null>(null);
   const [quickAssignSlot, setQuickAssignSlot] = useState<number | null>(null);
   const [targetSlotForAdd, setTargetSlotForAdd] = useState<number | null>(null);
 
@@ -95,6 +94,7 @@ export default function KamarSub({
   const [activeStudentDropdownId, setActiveStudentDropdownId] = useState<string | null>(null);
   const [studentDropdownPos, setStudentDropdownPos] = useState<{ top: number; left: number } | null>(null);
   const [isAutoNumberingDropdownOpen, setIsAutoNumberingDropdownOpen] = useState(false);
+  const [isAcakDropdownOpen, setIsAcakDropdownOpen] = useState(false);
 
   // Modals
   const [isKompleksModalOpen, setIsKompleksModalOpen] = useState(false);
@@ -110,7 +110,69 @@ export default function KamarSub({
 
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [addMemberSearch, setAddMemberSearch] = useState('');
-  const [addMemberRoomFilter, setAddMemberRoomFilter] = useState<string>('BelumKamar');
+  const [addMemberSpecificRoomFilter, setAddMemberSpecificRoomFilter] = useState<string>('BelumKamar');
+  const [addMemberLemariFilter, setAddMemberLemariFilter] = useState<string>('Semua');
+  const [collapsedRoomKeys, setCollapsedRoomKeys] = useState<string[]>([]);
+
+  // Prevent background body scrolling when add member modal is open
+  useEffect(() => {
+    if (isAddMemberModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isAddMemberModalOpen]);
+
+  // Auto-scroll page when dragging items near viewport top or bottom edge
+  useEffect(() => {
+    if (!draggedStudentId) return;
+
+    let animFrameId: number | null = null;
+    let currentY = 0;
+
+    const handleDragOver = (e: DragEvent) => {
+      if (e.clientY) {
+        currentY = e.clientY;
+      }
+    };
+
+    const handleDragEndGlobal = () => {
+      setDraggedStudentId(null);
+    };
+
+    const doAutoScroll = () => {
+      if (currentY > 0) {
+        const threshold = 120;
+        const vh = window.innerHeight;
+
+        if (currentY < threshold) {
+          const ratio = (threshold - currentY) / threshold;
+          const scrollSpeed = Math.max(4, Math.round(ratio * 28));
+          window.scrollBy(0, -scrollSpeed);
+        } else if (currentY > vh - threshold) {
+          const ratio = (currentY - (vh - threshold)) / threshold;
+          const scrollSpeed = Math.max(4, Math.round(ratio * 28));
+          window.scrollBy(0, scrollSpeed);
+        }
+      }
+      animFrameId = requestAnimationFrame(doAutoScroll);
+    };
+
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('dragend', handleDragEndGlobal);
+    window.addEventListener('drop', handleDragEndGlobal);
+    animFrameId = requestAnimationFrame(doAutoScroll);
+
+    return () => {
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragend', handleDragEndGlobal);
+      window.removeEventListener('drop', handleDragEndGlobal);
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+    };
+  }, [draggedStudentId]);
   const [selectedModalStudentIds, setSelectedModalStudentIds] = useState<string[]>([]);
 
   const [selectedSantriForDetail, setSelectedSantriForDetail] = useState<Santri | null>(null);
@@ -510,6 +572,7 @@ export default function KamarSub({
 
   // Shuffle/Randomize santri into available closet slots
   const handleAcakSantri = () => {
+    setIsAcakDropdownOpen(false);
     if (!activeRoomForDetail) return;
     const members = getMembersOfRoom(activeRoomForDetail.nama);
     if (members.length === 0) {
@@ -546,116 +609,165 @@ export default function KamarSub({
     showToast(`Pengacakan selesai! ${shuffledMembers.length} santri berhasil ditempatkan di lemari.`);
   };
 
-  // Drag and drop handlers: SWAP (Drop on row) vs SHIFT (Drop on top line)
+  const handleAcakLemariKosong = () => {
+    setIsAcakDropdownOpen(false);
+    if (!activeRoomForDetail) return;
+    const members = getMembersOfRoom(activeRoomForDetail.nama);
+    if (members.length === 0) {
+      showToast('Tidak ada santri di kamar ini.', 'error');
+      return;
+    }
+    const capacity = activeRoomForDetail.kapasitas || 15;
+
+    const occupiedSlotNums = new Set(
+      members
+        .map(s => parseInt(s.nomorLemari || '0', 10))
+        .filter(num => num > 0)
+    );
+
+    const emptySlots = Array.from({ length: capacity }, (_, i) => i + 1).filter(s => !occupiedSlotNums.has(s));
+
+    if (emptySlots.length === 0) {
+      showToast('Tidak ada lemari kosong yang tersisa.', 'error');
+      return;
+    }
+
+    const unassignedMembers = members.filter(s => {
+      const num = parseInt(s.nomorLemari || '0', 10);
+      return !num || num <= 0;
+    });
+
+    if (unassignedMembers.length === 0) {
+      showToast('Semua santri di kamar ini sudah memiliki lemari.', 'error');
+      return;
+    }
+
+    const shuffledMembers = [...unassignedMembers];
+    for (let i = shuffledMembers.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffledMembers[i], shuffledMembers[j]] = [shuffledMembers[j], shuffledMembers[i]];
+    }
+
+    const shuffledSlots = [...emptySlots];
+    for (let i = shuffledSlots.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffledSlots[i], shuffledSlots[j]] = [shuffledSlots[j], shuffledSlots[i]];
+    }
+
+    shuffledMembers.forEach((santri, idx) => {
+      if (idx < shuffledSlots.length) {
+        onUpdateSantriRoom(santri.id, activeRoomForDetail.nama, String(shuffledSlots[idx]));
+      }
+    });
+
+    showToast(`${Math.min(shuffledMembers.length, shuffledSlots.length)} santri tanpa lemari berhasil ditempatkan di lemari kosong.`);
+  };
+
+  const handleKosongkanSemuaLemari = () => {
+    setIsAcakDropdownOpen(false);
+    if (!activeRoomForDetail) return;
+    const members = getMembersOfRoom(activeRoomForDetail.nama);
+    if (members.length === 0) return;
+
+    if (confirm(`Apakah Anda yakin ingin mengosongkan seluruh nomor lemari untuk ${members.length} santri di kamar "${activeRoomForDetail.nama}"?`)) {
+      members.forEach(santri => {
+        onUpdateSantriRoom(santri.id, activeRoomForDetail.nama, '');
+      });
+      showToast(`Semua lemari di kamar "${activeRoomForDetail.nama}" berhasil dikosongkan.`);
+    }
+  };
+
+  // Drag and drop handler: MERGE (drop on occupied slot) / MOVE (drop on empty slot)
   const handleSlotDropSwap = (targetSlot: number) => {
     if (!draggedStudentId || !activeRoomForDetail) return;
     const draggedStudent = santriList.find(s => s.id === draggedStudentId);
     if (!draggedStudent) return;
 
     const targetSlotStr = String(targetSlot);
-    const oldSlotStr = draggedStudent.nomorLemari || '';
-    const oldSlotNum = parseInt(oldSlotStr, 10);
+    const isSameRoom = (draggedStudent.kamar || '').trim().toLowerCase() === activeRoomForDetail.nama.trim().toLowerCase();
+    const draggedSlotNum = parseInt(draggedStudent.nomorLemari || '0', 10);
+
+    // Prevent drop on own locker slot
+    if (isSameRoom && (draggedSlotNum === targetSlot || draggedStudent.nomorLemari === targetSlotStr)) {
+      setDraggedStudentId(null);
+      setDragOverSlot(null);
+      return;
+    }
 
     const currentMembers = getMembersOfRoom(activeRoomForDetail.nama);
     const targetOccupants = currentMembers.filter(s => {
       const num = parseInt(s.nomorLemari || '0', 10);
-      return num === targetSlot || s.nomorLemari === targetSlotStr;
+      return (num === targetSlot || s.nomorLemari === targetSlotStr) && s.id !== draggedStudent.id;
     });
 
     if (targetOccupants.length > 0) {
-      if (targetOccupants.length === 1 && targetOccupants[0].id === draggedStudent.id) {
-        setDraggedStudentId(null);
-        setDragOverSlot(null);
-        setDragOverTopSlot(null);
-        return;
-      }
-
-      // SWAP logic: target occupants get dragged student's old slot
-      targetOccupants.forEach(occ => {
-        if (occ.id !== draggedStudent.id) {
-          onUpdateSantriRoom(occ.id, activeRoomForDetail.nama, oldSlotStr);
-        }
-      });
+      // MERGE logic: assign dragged student to targetSlot without kicking existing occupants out
       onUpdateSantriRoom(draggedStudent.id, activeRoomForDetail.nama, targetSlotStr);
 
       const targetNames = targetOccupants.map(o => o.nama).join(', ');
-      const oldSlotDisplay = oldSlotNum > 0 ? `Lemari ${String(oldSlotNum).padStart(2, '0')}` : 'Tanpa Lemari';
-      showToast(`Tukar Lemari: ${draggedStudent.nama} ↔ ${targetNames} (${oldSlotDisplay})`);
+      showToast(`${draggedStudent.nama} berhasil digabungkan ke Lemari ${String(targetSlot).padStart(2, '0')} bersama ${targetNames}.`);
     } else {
-      // Empty slot
+      // Move to empty slot
       onUpdateSantriRoom(draggedStudent.id, activeRoomForDetail.nama, targetSlotStr);
-      showToast(`${draggedStudent.nama} dipindahkan ke Lemari ${String(targetSlot).padStart(2, '0')}`);
+      showToast(`${draggedStudent.nama} dipindahkan ke Lemari ${String(targetSlot).padStart(2, '0')}.`);
     }
 
     setDraggedStudentId(null);
     setDragOverSlot(null);
-    setDragOverTopSlot(null);
-  };
-
-  const handleSlotDropShift = (targetSlot: number) => {
-    if (!draggedStudentId || !activeRoomForDetail) return;
-    const draggedStudent = santriList.find(s => s.id === draggedStudentId);
-    if (!draggedStudent) return;
-
-    const currentMembers = getMembersOfRoom(activeRoomForDetail.nama);
-
-    // Filter members in slots >= targetSlot (except dragged student itself)
-    const membersToShift = currentMembers.filter(s => {
-      if (s.id === draggedStudent.id) return false;
-      const num = parseInt(s.nomorLemari || '0', 10);
-      return num >= targetSlot;
-    });
-
-    // Sort descending by current slot number to shift from bottom to top safely
-    membersToShift.sort((a, b) => {
-      const numA = parseInt(a.nomorLemari || '0', 10);
-      const numB = parseInt(b.nomorLemari || '0', 10);
-      return numB - numA;
-    });
-
-    // Shift each student down by 1 slot number
-    membersToShift.forEach(s => {
-      const curNum = parseInt(s.nomorLemari || '0', 10);
-      onUpdateSantriRoom(s.id, activeRoomForDetail.nama, String(curNum + 1));
-    });
-
-    // Put dragged student at targetSlot
-    onUpdateSantriRoom(draggedStudent.id, activeRoomForDetail.nama, String(targetSlot));
-
-    showToast(`${draggedStudent.nama} disisipkan di Lemari ${String(targetSlot).padStart(2, '0')}, lemari berikutnya tergeser.`);
-
-    setDraggedStudentId(null);
-    setDragOverSlot(null);
-    setDragOverTopSlot(null);
   };
 
   // Add Member Modal logic
   const handleOpenAddMemberModal = (slotNum?: number) => {
     if (typeof slotNum === 'number') {
       setTargetSlotForAdd(slotNum);
+      setAddMemberLemariFilter('BelumLemari');
+      setAddMemberSpecificRoomFilter('Semua');
     } else {
       setTargetSlotForAdd(null);
+      setAddMemberLemariFilter('Semua');
+      setAddMemberSpecificRoomFilter('BelumKamar');
     }
     setSelectedModalStudentIds([]);
+    setCollapsedRoomKeys([]);
     setAddMemberSearch('');
-    setAddMemberRoomFilter('BelumKamar');
     setIsAddMemberModalOpen(true);
   };
 
-  // Students eligible to be added to room
+  // Students eligible to be added to room / lemari
   const eligibleStudentsForAdd = santriList.filter(s => {
     if (s.gender !== selectedGender) return false;
     if (s.statusKeanggotaan === 'Alumni') return false;
 
-    // Filter by room assignment status
-    if (addMemberRoomFilter === 'BelumKamar') {
-      const k = (s.kamar || '').trim().toLowerCase();
-      if (k && k !== 'tanpa kamar') return false;
+    // If targetSlotForAdd is set, exclude students who are ALREADY in targetSlotForAdd in this active room
+    if (activeRoomForDetail && targetSlotForAdd) {
+      const inCurrentRoom = (s.kamar || '').trim().toLowerCase() === activeRoomForDetail.nama.trim().toLowerCase();
+      const slotNum = parseInt(s.nomorLemari || '0', 10);
+      if (inCurrentRoom && (slotNum === targetSlotForAdd || s.nomorLemari === String(targetSlotForAdd))) {
+        return false;
+      }
     }
 
-    if (activeRoomForDetail) {
-      const inCurrentRoom = (s.kamar || '').trim().toLowerCase() === activeRoomForDetail.nama.trim().toLowerCase();
-      if (inCurrentRoom) return false;
+    const kamarNorm = (s.kamar || '').trim().toLowerCase();
+    const isBelumKamar = !kamarNorm || kamarNorm === 'tanpa kamar' || kamarNorm === 'belum kamar';
+    const slotNum = parseInt(s.nomorLemari || '0', 10);
+    const isBelumLemari = !s.nomorLemari || isNaN(slotNum) || slotNum <= 0;
+
+    // Filter by Current Room (Semua, Belum Memiliki Kamar, or Specific Room Name)
+    if (addMemberSpecificRoomFilter !== 'Semua') {
+      if (addMemberSpecificRoomFilter === 'BelumKamar') {
+        if (!isBelumKamar) return false;
+      } else {
+        if (s.kamar?.trim().toLowerCase() !== addMemberSpecificRoomFilter.trim().toLowerCase()) {
+          return false;
+        }
+      }
+    }
+
+    // Filter by Status Lemari (Semua, Sudah Dapat Lemari, Belum Dapat Lemari)
+    if (addMemberLemariFilter === 'SudahLemari') {
+      if (isBelumLemari) return false;
+    } else if (addMemberLemariFilter === 'BelumLemari') {
+      if (!isBelumLemari) return false;
     }
 
     // Filter by search query
@@ -664,7 +776,8 @@ export default function KamarSub({
       const mName = (s.nama || '').toLowerCase().includes(q);
       const mNis = (s.nis || '').toLowerCase().includes(q);
       const mKamar = (s.kamar || '').toLowerCase().includes(q);
-      if (!mName && !mNis && !mKamar) return false;
+      const mLemari = (s.nomorLemari || '').toLowerCase().includes(q);
+      if (!mName && !mNis && !mKamar && !mLemari) return false;
     }
 
     return true;
@@ -673,16 +786,46 @@ export default function KamarSub({
   const handleConfirmAddMembers = () => {
     if (!activeRoomForDetail || selectedModalStudentIds.length === 0) return;
 
-    selectedModalStudentIds.forEach(id => {
-      onUpdateSantriRoom(
-        id, 
-        activeRoomForDetail.nama, 
-        targetSlotForAdd ? String(targetSlotForAdd) : undefined
-      );
-    });
+    if (targetSlotForAdd) {
+      // Adding co-occupants / direct assignment to targetSlotForAdd
+      selectedModalStudentIds.forEach(id => {
+        onUpdateSantriRoom(id, activeRoomForDetail.nama, String(targetSlotForAdd));
+      });
+      showToast(`${selectedModalStudentIds.length} santri berhasil ditambahkan ke Lemari No. ${String(targetSlotForAdd).padStart(2, '0')}.`);
+    } else {
+      // General Add Members to Room: fill empty slots sequentially, set unassigned if room full
+      const roomCapacity = activeRoomForDetail.kapasitas || 15;
 
-    const slotMsg = targetSlotForAdd ? ` ke Lemari No. ${String(targetSlotForAdd).padStart(2, '0')}` : '';
-    showToast(`${selectedModalStudentIds.length} santri berhasil ditambahkan ke ${activeRoomForDetail.nama}${slotMsg}.`);
+      const occupiedSlotNums = new Set(
+        currentRoomMembers
+          .map(s => parseInt(s.nomorLemari || '0', 10))
+          .filter(n => !isNaN(n) && n > 0 && n <= roomCapacity)
+      );
+
+      const availableEmptySlots = Array.from({ length: roomCapacity }, (_, i) => i + 1)
+        .filter(slot => !occupiedSlotNums.has(slot));
+
+      let assignedCount = 0;
+      let unassignedCount = 0;
+
+      selectedModalStudentIds.forEach(id => {
+        const slotToAssign = availableEmptySlots.shift();
+        if (slotToAssign !== undefined) {
+          assignedCount++;
+          onUpdateSantriRoom(id, activeRoomForDetail.nama, String(slotToAssign));
+        } else {
+          unassignedCount++;
+          onUpdateSantriRoom(id, activeRoomForDetail.nama, '');
+        }
+      });
+
+      let msg = `${selectedModalStudentIds.length} santri berhasil ditambahkan ke ${activeRoomForDetail.nama}.`;
+      if (unassignedCount > 0) {
+        msg += ` (${assignedCount} mengisi lemari, ${unassignedCount} belum dapat lemari)`;
+      }
+      showToast(msg);
+    }
+
     setSelectedModalStudentIds([]);
     setTargetSlotForAdd(null);
     setIsAddMemberModalOpen(false);
@@ -1101,7 +1244,7 @@ export default function KamarSub({
                 <UserCheck className="h-5.5 w-5.5" />
               </div>
               <div>
-                <p className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest leading-none">Kapasitas</p>
+                <p className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest leading-none">Kapasitas Lemari</p>
                 <p className="text-xl font-display font-extrabold text-slate-900 mt-1 flex items-baseline gap-1">
                   <span>{overallOccupancyPercent}%</span>
                   <span className="text-xs font-medium text-slate-400">({placedSantriCount}/{totalGenderCapacity})</span>
@@ -1357,6 +1500,9 @@ export default function KamarSub({
                       sortedRooms.map(kam => {
                         const members = getMembersOfRoom(kam.nama);
                         const capacity = kam.kapasitas || 15;
+                        const occupiedLemariCount = Array.from({ length: capacity }, (_, i) => i + 1).filter(slotNum => 
+                          members.some(s => parseInt(s.nomorLemari || '0', 10) === slotNum || s.nomorLemari === String(slotNum))
+                        ).length;
                         const isSelected = activeRoomForDetail?.id === kam.id;
 
                         return (
@@ -1388,7 +1534,7 @@ export default function KamarSub({
                               <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
                                 isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
                               }`}>
-                                {members.length}/{capacity}
+                                {occupiedLemariCount}/{capacity}
                               </span>
 
                               {canWriteCurrent && (
@@ -1480,15 +1626,15 @@ export default function KamarSub({
                 </div>
               </div>
 
-              {/* Stat Cards (Wali Kelas / Ketua Kamar, Kapasitas) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Stat Cards (Ketua Kamar, Jumlah Santri, Kapasitas Lemari) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                 {/* Card 1: Ketua Kamar */}
                 <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-2">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
                     KETUA KAMAR
                   </span>
                   <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl bg-purple-50 text-purple-700">
+                    <div className="p-2 rounded-xl bg-purple-50 text-purple-700 shrink-0">
                       <User className="w-4 h-4" />
                     </div>
                     <span className="text-sm font-extrabold text-slate-800 truncate">
@@ -1497,27 +1643,43 @@ export default function KamarSub({
                   </div>
                 </div>
 
-                {/* Card 2: Kapasitas */}
+                {/* Card 2: Jumlah Santri */}
+                <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                    JUMLAH SANTRI
+                  </span>
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-purple-50 text-purple-700 shrink-0">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <span className="text-sm font-extrabold text-slate-800 truncate">
+                      {currentRoomMembers.length} Santri
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card 3: Kapasitas Lemari */}
                 {(() => {
                   const roomCapacity = activeRoomForDetail.kapasitas || 15;
                   const occupiedSlotsCount = Array.from({ length: roomCapacity }, (_, i) => i + 1).filter(slotNum => 
                     currentRoomMembers.some(s => parseInt(s.nomorLemari || '0', 10) === slotNum || s.nomorLemari === String(slotNum))
                   ).length;
+                  const pct = Math.min(100, Math.round((occupiedSlotsCount / roomCapacity) * 100));
 
                   return (
                     <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-2">
                       <div className="flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-wider">
                         <span>KAPASITAS LEMARI</span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-purple-700 font-extrabold">{occupiedSlotsCount} / {roomCapacity} Lemari</span>
-                          <span className="text-slate-500 text-[10px] font-medium">({currentRoomMembers.length} Santri)</span>
-                        </div>
+                        <span className="text-purple-700 font-extrabold">{occupiedSlotsCount} / {roomCapacity} Lemari</span>
                       </div>
-                      <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden mt-2">
+                      <div className="relative w-full bg-slate-200/80 h-6 rounded-full overflow-hidden flex items-center justify-center shadow-inner">
                         <div 
-                          className="h-full bg-purple-600 transition-all duration-300"
-                          style={{ width: `${Math.min(100, Math.round((occupiedSlotsCount / roomCapacity) * 100))}%` }}
+                          className="absolute left-0 top-0 bottom-0 bg-purple-600 transition-all duration-300 rounded-full"
+                          style={{ width: `${pct}%` }}
                         />
+                        <span className={`relative z-10 text-[11px] font-black tracking-wider ${pct > 40 ? 'text-white drop-shadow-xs' : 'text-slate-800'}`}>
+                          {pct}%
+                        </span>
                       </div>
                     </div>
                   );
@@ -1530,16 +1692,54 @@ export default function KamarSub({
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 {/* Search & Action Controls */}
                 <div className="flex flex-wrap items-center gap-2 flex-1">
-                  {/* Tombol Acak Santri */}
+                  {/* Tombol Acak Santri + Dropdown v */}
                   {canWriteCurrent && (
-                    <button
-                      onClick={handleAcakSantri}
-                      className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-all cursor-pointer shadow-3xs flex items-center gap-1.5 text-xs font-bold shrink-0"
-                      title="Acak Santri ke Lemari Kosong"
-                    >
-                      <Shuffle className="w-4 h-4 text-purple-600" />
-                      <span>Acak Santri</span>
-                    </button>
+                    <div className="relative inline-flex items-center rounded-xl border border-slate-200 bg-white shadow-3xs shrink-0">
+                      <button
+                        onClick={handleAcakSantri}
+                        className="p-2 hover:bg-slate-50 text-slate-700 transition-all cursor-pointer rounded-l-xl flex items-center justify-center border-r border-slate-100"
+                        title="Acak Santri ke Lemari"
+                      >
+                        <Shuffle className="w-4 h-4 text-purple-600" />
+                      </button>
+                      <button
+                        onClick={() => setIsAcakDropdownOpen(prev => !prev)}
+                        className="px-2 py-2 hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-all cursor-pointer rounded-r-xl flex items-center justify-center"
+                        title="Pengaturan Acak Lemari"
+                      >
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isAcakDropdownOpen ? 'rotate-180 text-purple-600' : ''}`} />
+                      </button>
+
+                      {/* Dropdown Menu Pengaturan Acak */}
+                      {isAcakDropdownOpen && (
+                        <div className="absolute left-0 top-full mt-1.5 w-56 bg-white rounded-2xl border border-slate-200 shadow-xl p-1.5 z-30 space-y-0.5 animate-fade-in">
+                          <div className="px-2.5 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                            Pengaturan Acak Santri
+                          </div>
+                          <button
+                            onClick={handleAcakSantri}
+                            className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2 cursor-pointer transition-colors"
+                          >
+                            <Shuffle className="w-3.5 h-3.5 text-purple-600" />
+                            <span>Acak Semua Lemari</span>
+                          </button>
+                          <button
+                            onClick={handleAcakLemariKosong}
+                            className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2 cursor-pointer transition-colors"
+                          >
+                            <UserPlus className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Acak Santri Tanpa Lemari</span>
+                          </button>
+                          <button
+                            onClick={handleKosongkanSemuaLemari}
+                            className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100 mt-1 pt-2"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Kosongkan Semua Lemari</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* Search Bar */}
@@ -1570,11 +1770,31 @@ export default function KamarSub({
                     <option value="Muqim">Muqim</option>
                     <option value="Kampung">Kampung</option>
                   </select>
+
+                  {/* Tombol Pilih / Mode Pilih */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSelectionMode(prev => !prev);
+                      if (isSelectionMode) {
+                        setSelectedStudentIds([]);
+                      }
+                    }}
+                    className={`py-1.5 px-3 text-xs font-bold rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
+                      isSelectionMode
+                        ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
+                        : 'border-slate-200 bg-slate-50/50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                    title="Mode Pilih Banyak Anggota Kamar"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    <span>{isSelectionMode ? 'Batal Pilih' : 'Pilih'}</span>
+                  </button>
                 </div>
               </div>
 
               {/* Bulk Action Bar Banner */}
-              {selectedStudentIds.length > 0 && (
+              {(isSelectionMode || selectedStudentIds.length > 0) && (
                 <div className="flex flex-wrap items-center justify-between gap-3 bg-purple-50 border border-purple-200 p-3 rounded-xl animate-fade-in">
                   <div className="flex items-center gap-2">
                     <div className="h-2 w-2 rounded-full bg-purple-600 animate-pulse" />
@@ -1583,26 +1803,62 @@ export default function KamarSub({
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
-                      onClick={() => setIsBulkTransferOpen(true)}
+                      onClick={() => {
+                        if (selectedStudentIds.length === 0) {
+                          showToast('Pilih setidaknya satu santri terlebih dahulu.');
+                          return;
+                        }
+                        setIsBulkTransferOpen(true);
+                      }}
                       className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
                     >
                       <ArrowLeftRight className="w-3.5 h-3.5" />
-                      <span>Pindahkan ke Kamar Lain</span>
+                      <span>Pindah Kamar</span>
                     </button>
 
                     <button
-                      onClick={() => askConfirmation(
-                        'Keluarkan Santri Terpilih',
-                        `Apakah Anda yakin ingin mengeluarkan ${selectedStudentIds.length} santri dari kamar ini?`,
-                        () => {
-                          selectedStudentIds.forEach(id => onUpdateSantriRoom(id, ''));
-                          setSelectedStudentIds([]);
-                          setIsSelectionMode(false);
-                          showToast(`${selectedStudentIds.length} santri dikeluarkan dari kamar.`);
+                      onClick={() => {
+                        if (selectedStudentIds.length === 0) {
+                          showToast('Pilih setidaknya satu santri terlebih dahulu.');
+                          return;
                         }
-                      )}
+                        askConfirmation(
+                          'Hapus Lemari Santri Terpilih',
+                          `Apakah Anda yakin ingin menghapus nomor lemari dari ${selectedStudentIds.length} santri yang dipilih?`,
+                          () => {
+                            selectedStudentIds.forEach(id => {
+                              onUpdateSantriRoom(id, activeRoomForDetail.nama, '');
+                            });
+                            setSelectedStudentIds([]);
+                            showToast(`Nomor lemari ${selectedStudentIds.length} santri berhasil dihapus.`);
+                          }
+                        );
+                      }}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Hapus Lemari</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (selectedStudentIds.length === 0) {
+                          showToast('Pilih setidaknya satu santri terlebih dahulu.');
+                          return;
+                        }
+                        askConfirmation(
+                          'Keluarkan Santri Terpilih',
+                          `Apakah Anda yakin ingin mengeluarkan ${selectedStudentIds.length} santri dari kamar ini?`,
+                          () => {
+                            selectedStudentIds.forEach(id => onUpdateSantriRoom(id, ''));
+                            setSelectedStudentIds([]);
+                            setIsSelectionMode(false);
+                            showToast(`${selectedStudentIds.length} santri dikeluarkan dari kamar.`);
+                          }
+                        );
+                      }}
                       className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
                     >
                       <UserMinus className="w-3.5 h-3.5" />
@@ -1610,7 +1866,10 @@ export default function KamarSub({
                     </button>
 
                     <button
-                      onClick={() => setSelectedStudentIds([])}
+                      onClick={() => {
+                        setSelectedStudentIds([]);
+                        setIsSelectionMode(false);
+                      }}
                       className="px-2.5 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 rounded-lg text-xs font-bold transition-all cursor-pointer"
                     >
                       Batal
@@ -1639,7 +1898,7 @@ export default function KamarSub({
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-extrabold text-amber-900 flex items-center gap-1.5">
                             <AlertCircle className="w-4 h-4 text-amber-600" />
-                            Santri Belum Ada No. Lemari ({unassignedMembers.length})
+                            Belum Dapat Lemari ({unassignedMembers.length})
                           </span>
                           <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
                             Tarik ke slot lemari di bawah
@@ -1654,10 +1913,33 @@ export default function KamarSub({
                                 setDraggedStudentId(s.id);
                                 e.dataTransfer.setData('text/plain', s.id);
                               }}
-                              className="px-3 py-1.5 bg-white border border-amber-300/80 hover:border-purple-500 rounded-xl shadow-2xs text-xs font-bold text-slate-800 flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-purple-50 transition-all"
+                              onDragEnd={() => {
+                                setDraggedStudentId(null);
+                              }}
+                              className="group relative px-3 py-1.5 bg-white border border-amber-300/80 hover:border-purple-500 rounded-xl shadow-2xs text-xs font-bold text-slate-800 flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-purple-50 transition-all pr-8"
                             >
                               {renderSantriAvatar(s, "w-6 h-6 rounded-full border border-slate-200 text-[10px]")}
                               <span>{s.nama}</span>
+                              {canWriteCurrent && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    askConfirmation(
+                                      'Keluarkan Santri',
+                                      `Apakah Anda yakin ingin mengeluarkan santri "${s.nama}" dari kamar ini?`,
+                                      () => {
+                                        onUpdateSantriRoom(s.id, '');
+                                        showToast(`Santri "${s.nama}" dikeluarkan dari kamar.`);
+                                      }
+                                    );
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-100 transition-all cursor-pointer"
+                                  title="Keluarkan dari kamar"
+                                >
+                                  <X className="w-3.5 h-3.5 stroke-[2.5]" />
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1670,8 +1952,27 @@ export default function KamarSub({
                         <table className="w-full text-left border-collapse">
                           <thead>
                             <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500 font-extrabold select-none">
-                              <th className="py-3 px-3.5 w-12 text-center">No</th>
+                              {isSelectionMode && (
+                                <th className="py-3 px-2 w-10 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      currentRoomMembers.length > 0 &&
+                                      currentRoomMembers.every(s => selectedStudentIds.includes(s.id))
+                                    }
+                                    onChange={e => {
+                                      if (e.target.checked) {
+                                        setSelectedStudentIds(currentRoomMembers.map(s => s.id));
+                                      } else {
+                                        setSelectedStudentIds([]);
+                                      }
+                                    }}
+                                    className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                                  />
+                                </th>
+                              )}
                               <th className="py-3 px-3.5 w-28 text-center">No. Lemari</th>
+                              <th className="py-3 px-3.5 w-12 text-center">No</th>
                               <th className="py-3 px-3.5 min-w-[200px]">Nama Santri</th>
                               <th className="py-3 px-3.5 w-28">NIS</th>
                               <th className="py-3 px-3.5 w-48">Alamat</th>
@@ -1693,54 +1994,83 @@ export default function KamarSub({
 
                                 const isOver = dragOverSlot === slotNum;
 
+                                // Check if dragged student is already in this locker slot
+                                const draggedStudentObj = draggedStudentId ? santriList.find(s => s.id === draggedStudentId) : null;
+                                const isOwnSlot = Boolean(
+                                  draggedStudentObj &&
+                                  (draggedStudentObj.kamar || '').trim().toLowerCase() === activeRoomForDetail.nama.trim().toLowerCase() &&
+                                  (parseInt(draggedStudentObj.nomorLemari || '0', 10) === slotNum || draggedStudentObj.nomorLemari === slotStr)
+                                );
+
                                 return (
                                   <React.Fragment key={slotNum}>
                                     {occupants.length === 0 ? (
                                       /* Empty Slot Row */
                                       <tr
+                                        data-slot={slotNum}
+                                        onDragEnter={(e) => {
+                                          e.preventDefault();
+                                          e.dataTransfer.dropEffect = 'move';
+                                          if (!isOwnSlot && dragOverSlot !== slotNum) {
+                                            setDragOverSlot(slotNum);
+                                          }
+                                        }}
                                         onDragOver={(e) => {
                                           e.preventDefault();
-                                          setDragOverSlot(slotNum);
-                                          setDragOverTopSlot(null);
+                                          e.dataTransfer.dropEffect = 'move';
+                                          if (!isOwnSlot && dragOverSlot !== slotNum) {
+                                            setDragOverSlot(slotNum);
+                                          }
                                         }}
-                                        onDragLeave={() => setDragOverSlot(null)}
+                                        onDragLeave={(e) => {
+                                          const related = e.relatedTarget as HTMLElement | null;
+                                          if (related && (e.currentTarget.contains(related) || related.closest?.(`[data-slot="${slotNum}"]`))) {
+                                            return;
+                                          }
+                                          if (dragOverSlot === slotNum) {
+                                            setDragOverSlot(null);
+                                          }
+                                        }}
                                         onDrop={(e) => {
                                           e.preventDefault();
-                                          handleSlotDropSwap(slotNum);
+                                          if (!isOwnSlot) {
+                                            handleSlotDropSwap(slotNum);
+                                          }
                                         }}
                                         className={`transition-colors ${
-                                          isOver ? 'bg-purple-100/80' : 'bg-slate-50/20 hover:bg-purple-50/30'
+                                          isOver && !isOwnSlot ? 'bg-emerald-100/90 ring-2 ring-emerald-500/80 z-10' : 'bg-slate-50/20 hover:bg-purple-50/30'
                                         }`}
                                       >
-                                        <td className="py-3 px-3.5 text-center font-mono text-slate-300 text-[11px]">
-                                          -
-                                        </td>
+                                        {isSelectionMode && (
+                                          <td className="py-3 px-2 text-center font-mono text-slate-300 text-[11px]">-</td>
+                                        )}
                                         <td className="py-3 px-3.5 text-center">
                                           <span className="font-mono font-bold text-xs bg-slate-100 text-slate-400 px-2 py-0.5 rounded-md border border-slate-200">
                                             {String(slotNum).padStart(2, '0')}
                                           </span>
                                         </td>
+                                        <td className="py-3 px-3.5 text-center font-mono text-slate-300 text-[11px]">
+                                          -
+                                        </td>
                                         <td className="py-3 px-3.5">
-                                          <div
-                                            onClick={() => canWriteCurrent && handleOpenAddMemberModal(slotNum)}
-                                            className="flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-purple-600 cursor-pointer transition-colors py-0.5"
-                                          >
-                                            <span className="font-bold text-slate-300 hover:text-purple-500">+ Slot Kosong</span>
-                                            <span className="text-[10px] text-slate-400 hidden sm:inline">(Klik atau tarik santri ke sini)</span>
-                                          </div>
+                                          {isOver && !isOwnSlot ? (
+                                            <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-800 bg-emerald-100/90 px-3 py-1.5 rounded-xl border border-emerald-300 w-fit shadow-2xs">
+                                              <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-600" />
+                                              <span>Pindah ke sini</span>
+                                            </div>
+                                          ) : (
+                                            <div
+                                              onClick={() => canWriteCurrent && handleOpenAddMemberModal(slotNum)}
+                                              className="flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-purple-600 cursor-pointer transition-colors py-0.5"
+                                            >
+                                              <span>Klik atau tarik santri ke sini</span>
+                                            </div>
+                                          )}
                                         </td>
                                         <td className="py-3 px-3.5 font-mono text-slate-300 text-[11px]">-</td>
                                         <td className="py-3 px-3.5 text-slate-300 text-[11px]">-</td>
-                                        <td className="py-3 px-3.5 text-center sticky right-0 bg-white group-hover:bg-purple-50/20 z-10 border-l border-slate-100 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.03)]">
-                                          {canWriteCurrent && (
-                                            <button
-                                              onClick={() => handleOpenAddMemberModal(slotNum)}
-                                              className="p-1 px-2 rounded-lg bg-slate-100 hover:bg-purple-100 text-slate-600 hover:text-purple-700 text-[10px] font-bold cursor-pointer transition-colors"
-                                              title="Isi Lemari Ini"
-                                            >
-                                              + Isi
-                                            </button>
-                                          )}
+                                        <td className="py-3 px-3.5 text-center sticky right-0 bg-white group-hover:bg-purple-50/20 z-10 border-l border-slate-100 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.03)] text-slate-300 text-[11px]">
+                                          -
                                         </td>
                                       </tr>
                                     ) : (
@@ -1755,93 +2085,99 @@ export default function KamarSub({
                                         );
 
                                         return (
-                                          <React.Fragment key={s.id}>
-                                            {/* Top Border Drop Zone for Shift Insertion */}
-                                            {canWriteCurrent && draggedStudentId && (
-                                              <tr
-                                                className="relative"
-                                                onDragOver={(e) => {
-                                                  e.preventDefault();
-                                                  e.stopPropagation();
-                                                  setDragOverTopSlot(slotNum);
-                                                  setDragOverSlot(null);
-                                                }}
-                                                onDragLeave={() => setDragOverTopSlot(null)}
-                                                onDrop={(e) => {
-                                                  e.preventDefault();
-                                                  e.stopPropagation();
-                                                  handleSlotDropShift(slotNum);
-                                                }}
-                                              >
-                                                <td colSpan={6} className="p-0 border-0 h-0 relative">
-                                                  <div className={`absolute top-0 left-0 right-0 z-20 transition-all ${
-                                                    dragOverTopSlot === slotNum
-                                                      ? 'h-4 -translate-y-2 bg-purple-600 shadow-lg flex items-center justify-center text-[10px] text-white font-black uppercase tracking-wider rounded-full'
-                                                      : 'h-1.5 -translate-y-0.5 bg-transparent hover:bg-purple-400/50'
-                                                  }`}>
-                                                    {dragOverTopSlot === slotNum && (
-                                                      <span>Sisipkan &amp; Geser Ke Lemari {String(slotNum).padStart(2, '0')}</span>
-                                                    )}
-                                                  </div>
-                                                </td>
-                                              </tr>
-                                            )}
-
-                                            <tr
-                                              draggable={canWriteCurrent}
-                                              onDragStart={(e) => {
-                                                setDraggedStudentId(s.id);
-                                                e.dataTransfer.setData('text/plain', s.id);
-                                              }}
-                                              onDragEnd={() => {
-                                                setDraggedStudentId(null);
-                                                setDragOverSlot(null);
-                                                setDragOverTopSlot(null);
-                                              }}
-                                              onDragOver={(e) => {
-                                                e.preventDefault();
+                                          <tr
+                                            key={s.id}
+                                            data-slot={slotNum}
+                                            draggable={canWriteCurrent}
+                                            onDragStart={(e) => {
+                                              setDraggedStudentId(s.id);
+                                              e.dataTransfer.setData('text/plain', s.id);
+                                              e.dataTransfer.effectAllowed = 'move';
+                                            }}
+                                            onDragEnd={() => {
+                                              setDraggedStudentId(null);
+                                              setDragOverSlot(null);
+                                            }}
+                                            onDragEnter={(e) => {
+                                              e.preventDefault();
+                                              e.dataTransfer.dropEffect = 'move';
+                                              if (!isOwnSlot && dragOverSlot !== slotNum) {
                                                 setDragOverSlot(slotNum);
-                                                setDragOverTopSlot(null);
-                                              }}
-                                              onDragLeave={() => setDragOverSlot(null)}
-                                              onDrop={(e) => {
-                                                e.preventDefault();
+                                              }
+                                            }}
+                                            onDragOver={(e) => {
+                                              e.preventDefault();
+                                              e.dataTransfer.dropEffect = 'move';
+                                              if (!isOwnSlot && dragOverSlot !== slotNum) {
+                                                setDragOverSlot(slotNum);
+                                              }
+                                            }}
+                                            onDragLeave={(e) => {
+                                              const related = e.relatedTarget as HTMLElement | null;
+                                              if (related && (e.currentTarget.contains(related) || related.closest?.(`[data-slot="${slotNum}"]`))) {
+                                                return;
+                                              }
+                                              if (dragOverSlot === slotNum) {
+                                                setDragOverSlot(null);
+                                              }
+                                            }}
+                                            onDrop={(e) => {
+                                              e.preventDefault();
+                                              if (!isOwnSlot) {
                                                 handleSlotDropSwap(slotNum);
-                                              }}
-                                              className={`transition-colors cursor-grab active:cursor-grabbing group ${
-                                                isOver ? 'bg-purple-100/80 ring-2 ring-purple-400/50 z-10' : idx > 0 ? 'bg-purple-50/20 hover:bg-purple-50/40' : 'hover:bg-purple-50/20'
-                                              }`}
-                                            >
-                                              {/* No - Runtut per Santri */}
-                                              <td className="py-3 px-3.5 text-center font-mono font-bold text-slate-600 text-[11px]">
-                                                {currentSantriNo}
+                                              }
+                                            }}
+                                            className={`transition-colors cursor-grab active:cursor-grabbing group ${
+                                              isOver && !isOwnSlot ? 'bg-purple-100/95 ring-2 ring-purple-500/90 z-10' : idx > 0 ? 'bg-purple-50/20 hover:bg-purple-50/40' : 'hover:bg-purple-50/20'
+                                            }`}
+                                          >
+                                            {isSelectionMode && (
+                                              <td className="py-3 px-2 text-center" onClick={e => e.stopPropagation()}>
+                                                <input
+                                                  type="checkbox"
+                                                  checked={selectedStudentIds.includes(s.id)}
+                                                  onChange={e => {
+                                                    if (e.target.checked) {
+                                                      setSelectedStudentIds(prev => [...prev, s.id]);
+                                                    } else {
+                                                      setSelectedStudentIds(prev => prev.filter(id => id !== s.id));
+                                                    }
+                                                  }}
+                                                  className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                                                />
                                               </td>
+                                            )}
+                                            {/* No. Lemari - Show badge for primary (idx 0), connect with vertical line for co-occupants (idx > 0) */}
+                                            <td className="py-3 px-3.5 text-center align-middle relative overflow-visible">
+                                              {idx === 0 ? (
+                                                <div className="flex flex-col items-center justify-center relative">
+                                                  <span className="font-mono font-bold text-xs px-2 py-0.5 rounded-md border inline-block bg-purple-50 text-purple-700 border-purple-200 shadow-2xs z-10 relative">
+                                                    {String(slotNum).padStart(2, '0')}
+                                                  </span>
+                                                  {occupants.length > 1 && (
+                                                    <div className="w-0.5 bg-purple-400 absolute left-1/2 -translate-x-1/2 top-1/2 -bottom-3.5 z-0" />
+                                                  )}
+                                                </div>
+                                              ) : (
+                                                <div className="flex justify-center items-center h-full relative">
+                                                  {/* Vertical trunk line - connects seamlessly across py-3 cell boundaries */}
+                                                  <div className={`w-0.5 bg-purple-400 absolute left-1/2 -translate-x-1/2 z-0 ${
+                                                    idx === occupants.length - 1 ? '-top-3.5 h-[calc(50%+14px)]' : '-top-3.5 -bottom-3.5'
+                                                  }`} />
+                                                  {/* Horizontal branch tick pointing right */}
+                                                  <div className="w-2.5 h-0.5 bg-purple-400 absolute left-1/2 top-1/2 z-0" />
+                                                </div>
+                                              )}
+                                            </td>
 
-                                              {/* No. Lemari - Show badge for primary (idx 0), connect with vertical line for co-occupants (idx > 0) */}
-                                              <td className="py-3 px-3.5 text-center align-middle">
-                                                {idx === 0 ? (
-                                                  <div className="flex flex-col items-center justify-center relative">
-                                                    <span className="font-mono font-bold text-xs px-2 py-0.5 rounded-md border inline-block bg-purple-50 text-purple-700 border-purple-200 shadow-2xs">
-                                                      {String(slotNum).padStart(2, '0')}
-                                                    </span>
-                                                    {occupants.length > 1 && (
-                                                      <div className="w-0.5 bg-purple-300 h-3.5 absolute -bottom-3.5 left-1/2 -translate-x-1/2 z-0" />
-                                                    )}
-                                                  </div>
-                                                ) : (
-                                                  <div className="flex justify-center items-center h-full relative py-1">
-                                                    {/* Vertical trunk line */}
-                                                    <div className={`w-0.5 bg-purple-300 absolute left-1/2 -translate-x-1/2 ${
-                                                      idx === occupants.length - 1 ? '-top-3 h-6' : '-top-3 h-10'
-                                                    }`} />
-                                                    {/* Horizontal branch tick */}
-                                                    <div className="w-2.5 h-0.5 bg-purple-300 absolute left-1/2 top-1/2" />
-                                                  </div>
-                                                )}
-                                              </td>
+                                            {/* No - Runtut per Santri */}
+                                            <td className="py-3 px-3.5 text-center font-mono font-bold text-slate-600 text-[11px]">
+                                              {currentSantriNo}
+                                            </td>
 
-                                              {/* Nama Santri */}
-                                              <td className="py-3 px-3.5">
+                                            {/* Nama Santri */}
+                                            <td className="py-3 px-3.5">
+                                              <div className="flex items-center justify-between gap-2.5 min-w-0">
                                                 <div
                                                   onClick={() => setSelectedSantriForDetail(s)}
                                                   className="flex items-center gap-2.5 cursor-pointer group min-w-0"
@@ -1866,7 +2202,15 @@ export default function KamarSub({
                                                     </div>
                                                   </div>
                                                 </div>
-                                              </td>
+                                                {/* Label Gabung Ke Sini inside box when dragging over occupied slot */}
+                                                {isOver && !isOwnSlot && idx === 0 && (
+                                                  <span className="inline-flex items-center gap-1.5 text-xs font-black bg-purple-600 text-white px-2.5 py-1 rounded-xl shadow-xs shrink-0 animate-pulse">
+                                                    <UserPlus className="w-3.5 h-3.5 text-purple-200" />
+                                                    <span>Gabung ke sini</span>
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </td>
 
                                               {/* NIS */}
                                               <td className="py-3 px-3.5 font-mono text-slate-600 font-bold text-[11px]">
@@ -1893,7 +2237,6 @@ export default function KamarSub({
                                                 </div>
                                               </td>
                                             </tr>
-                                          </React.Fragment>
                                         );
                                       })
                                     )}
@@ -1911,7 +2254,7 @@ export default function KamarSub({
                                             className="overflow-hidden transition-all duration-200 ease-out flex items-center justify-center gap-2 border-b cursor-pointer max-h-0 py-0 opacity-0 group-hover/addslot:max-h-12 group-hover/addslot:py-2.5 group-hover/addslot:opacity-100 bg-purple-50/90 text-purple-600 border-dashed border-purple-300 hover:bg-purple-100 text-xs font-bold"
                                           >
                                             <UserPlus className="w-3.5 h-3.5" />
-                                            <span>+ Tambah Santri ke Lemari No. {String(slotNum).padStart(2, '0')}</span>
+                                            <span>+ Tambah Pengguna Lemari No. {String(slotNum).padStart(2, '0')}</span>
                                           </div>
                                         </td>
                                       </tr>
@@ -2031,7 +2374,7 @@ export default function KamarSub({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Kapasitas Tempat Tidur (Bed)</label>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Kapasitas Lemari</label>
                   <input
                     type="number"
                     min={1}
@@ -2071,7 +2414,7 @@ export default function KamarSub({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+              className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col h-[85vh] max-h-[680px] min-h-[480px]"
             >
               {/* Modal Header */}
               <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0 bg-white">
@@ -2080,7 +2423,9 @@ export default function KamarSub({
                     <UserPlus className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-extrabold text-slate-900">Tambah Anggota Kamar</h3>
+                    <h3 className="text-base font-extrabold text-slate-900">
+                      {targetSlotForAdd ? `Tambah Pengguna Lemari No. ${String(targetSlotForAdd).padStart(2, '0')}` : 'Tambah Anggota Kamar'}
+                    </h3>
                     <p className="text-xs font-semibold text-slate-500 mt-0.5">
                       {selectedKompleks?.nama?.toLowerCase()} &bull; {activeRoomForDetail.nama?.toLowerCase()}
                     </p>
@@ -2099,10 +2444,41 @@ export default function KamarSub({
                 const unselectedEligibleStudents = eligibleStudentsForAdd.filter(s => !selectedModalStudentIds.includes(s.id));
                 const selectedStudentsForModal = santriList.filter(s => selectedModalStudentIds.includes(s.id));
 
+                // Covered rooms by current gender kompleks
+                const coveredRoomNames = new Set(
+                  currentGenderKompleks.flatMap(kom => kamarList.filter(r => r.kompleksId === kom.id).map(r => r.nama.trim().toLowerCase()))
+                );
+                const extraRooms = Array.from(new Set(
+                  santriList
+                    .filter(s => s.gender === selectedGender && s.kamar && s.kamar.trim() && s.kamar.trim().toLowerCase() !== 'tanpa kamar' && s.kamar.trim().toLowerCase() !== 'belum kamar')
+                    .map(s => s.kamar.trim())
+                    .filter(kName => !coveredRoomNames.has(kName.toLowerCase()))
+                )).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+                // Group unselected eligible students by room
+                const groupedByRoom = unselectedEligibleStudents.reduce((acc, s) => {
+                  const kamarNorm = (s.kamar || '').trim().toLowerCase();
+                  const isBelumKamar = !kamarNorm || kamarNorm === 'tanpa kamar' || kamarNorm === 'belum kamar';
+                  const rawKamar = (s.kamar || '').trim();
+                  const roomKey = isBelumKamar
+                    ? 'Belum Memiliki Kamar'
+                    : (rawKamar.toLowerCase().startsWith('kamar') ? rawKamar : `Kamar ${rawKamar}`);
+
+                  if (!acc[roomKey]) acc[roomKey] = [];
+                  acc[roomKey].push(s);
+                  return acc;
+                }, {} as Record<string, typeof unselectedEligibleStudents>);
+
+                const sortedRoomKeys = Object.keys(groupedByRoom).sort((a, b) => {
+                  if (a === 'Belum Memiliki Kamar') return -1;
+                  if (b === 'Belum Memiliki Kamar') return 1;
+                  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+                });
+
                 return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-100 flex-1 overflow-hidden min-h-[380px] max-h-[500px]">
+                  <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-100 flex-1 min-h-0 overflow-hidden">
                     {/* Left Column: Santri Tersedia */}
-                    <div className="flex flex-col h-full overflow-hidden bg-white">
+                    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-white">
                       <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
                         <span className="text-xs font-extrabold text-slate-800">Santri Tersedia</span>
                         <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">
@@ -2111,61 +2487,161 @@ export default function KamarSub({
                       </div>
 
                       {/* Filter Bar */}
-                      <div className="p-3 bg-slate-50/50 border-b border-slate-100 flex flex-col sm:flex-row items-center gap-2 shrink-0">
-                        <div className="relative flex-1 w-full">
+                      <div className="p-3 bg-slate-50/80 border-b border-slate-100 space-y-2 shrink-0">
+                        {/* Search Input with Clear Button */}
+                        <div className="relative w-full">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                           <input
                             type="text"
-                            placeholder="Cari nama atau NIS..."
+                            placeholder="Cari nama, NIS, kamar, lemari..."
                             value={addMemberSearch}
                             onChange={e => setAddMemberSearch(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
+                            className="w-full pl-8 pr-8 py-1.5 text-xs font-medium rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none shadow-3xs"
                           />
+                          {addMemberSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setAddMemberSearch('')}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
-                        <select
-                          value={addMemberRoomFilter}
-                          onChange={e => setAddMemberRoomFilter(e.target.value)}
-                          className="py-1.5 px-2.5 text-xs font-bold rounded-xl border border-slate-200 bg-white text-slate-700 outline-none cursor-pointer w-full sm:w-auto"
-                        >
-                          <option value="BelumKamar">Belum Memiliki Kamar</option>
-                          <option value="Semua">Semua Santri</option>
-                        </select>
+
+                        {/* Dropdown Filters: Filter Kamar (Grouped by Kompleks) & Status Lemari */}
+                        <div className="grid grid-cols-2 gap-2">
+                          {/* Filter Kamar */}
+                          <select
+                            value={addMemberSpecificRoomFilter}
+                            onChange={e => setAddMemberSpecificRoomFilter(e.target.value)}
+                            className="py-1.5 px-2.5 text-xs font-bold rounded-xl border border-slate-200 bg-white text-slate-700 outline-none cursor-pointer w-full"
+                          >
+                            <option value="Semua">Semua Kamar</option>
+                            <option value="BelumKamar">Belum Memiliki Kamar</option>
+                            {currentGenderKompleks.map(kom => {
+                              const roomsInKom = kamarList.filter(r => r.kompleksId === kom.id);
+                              if (roomsInKom.length === 0) return null;
+                              return (
+                                <optgroup key={kom.id} label={`Kompleks ${kom.nama}`}>
+                                  {roomsInKom.map(r => (
+                                    <option key={r.id} value={r.nama}>
+                                      {r.nama.toLowerCase().startsWith('kamar') ? r.nama : `Kamar ${r.nama}`}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              );
+                            })}
+                            {extraRooms.length > 0 && (
+                              <optgroup label="Kamar Lainnya">
+                                {extraRooms.map(r => (
+                                  <option key={r} value={r}>
+                                    {r.toLowerCase().startsWith('kamar') ? r : `Kamar ${r}`}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </select>
+
+                          {/* Filter Status Lemari */}
+                          <select
+                            value={addMemberLemariFilter}
+                            onChange={e => setAddMemberLemariFilter(e.target.value)}
+                            className="py-1.5 px-2.5 text-xs font-bold rounded-xl border border-slate-200 bg-white text-slate-700 outline-none cursor-pointer w-full"
+                          >
+                            <option value="Semua">Semua Lemari</option>
+                            <option value="SudahLemari">Sudah Dapat Lemari</option>
+                            <option value="BelumLemari">Belum Dapat Lemari</option>
+                          </select>
+                        </div>
                       </div>
 
-                      {/* Available List */}
-                      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                      {/* Available List Grouped By Room */}
+                      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-4">
                         {unselectedEligibleStudents.length === 0 ? (
                           <div className="h-full flex flex-col items-center justify-center p-8 text-center min-h-[220px]">
                             <User className="w-10 h-10 text-slate-300 stroke-1 mb-2" />
                             <p className="text-xs font-bold text-slate-400">Tidak ada santri tersedia</p>
                           </div>
                         ) : (
-                          unselectedEligibleStudents.map(s => (
-                            <div
-                              key={s.id}
-                              onClick={() => setSelectedModalStudentIds([...selectedModalStudentIds, s.id])}
-                              className="p-2.5 rounded-xl border border-slate-100 bg-white hover:bg-emerald-50/40 hover:border-emerald-200 transition-all cursor-pointer flex items-center justify-between gap-3 shadow-3xs group"
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                {renderSantriAvatar(s, "w-8 h-8 rounded-full border border-slate-200 text-xs font-bold shrink-0")}
-                                <div className="min-w-0">
-                                  <p className="text-xs font-extrabold text-slate-800 truncate">{s.nama}</p>
-                                  <p className="text-[10px] text-slate-400 truncate">
-                                    NIS: {s.nis || '-'} &bull; {s.kamar || 'Belum Ada Kamar'}
-                                  </p>
+                          sortedRoomKeys.map(roomKey => {
+                            const isCollapsed = collapsedRoomKeys.includes(roomKey);
+
+                            return (
+                              <div key={roomKey} className="space-y-1.5">
+                                {/* Group Header with Minimize Toggle */}
+                                <div
+                                  onClick={() => {
+                                    setCollapsedRoomKeys(prev =>
+                                      prev.includes(roomKey)
+                                        ? prev.filter(k => k !== roomKey)
+                                        : [...prev, roomKey]
+                                    );
+                                  }}
+                                  className="sticky top-0 z-10 bg-slate-100/90 hover:bg-slate-200/80 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-slate-200/80 flex items-center justify-between text-[11px] font-extrabold text-slate-700 shadow-3xs cursor-pointer transition-colors select-none"
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    {isCollapsed ? (
+                                      <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+                                    ) : (
+                                      <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+                                    )}
+                                    <DoorClosed className="w-3.5 h-3.5 text-purple-600" />
+                                    {roomKey}
+                                  </span>
+                                  <span className="text-[10px] font-extrabold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                                    {groupedByRoom[roomKey].length} santri
+                                  </span>
                                 </div>
+
+                                {/* Student Cards in Group */}
+                                {!isCollapsed && (
+                                  <div className="space-y-1.5 pt-0.5">
+                                    {groupedByRoom[roomKey].map(s => {
+                                      const kamarNorm = (s.kamar || '').trim().toLowerCase();
+                                      const isBelumKamar = !kamarNorm || kamarNorm === 'tanpa kamar' || kamarNorm === 'belum kamar';
+                                      const slotNum = parseInt(s.nomorLemari || '0', 10);
+                                      const isBelumLemari = !s.nomorLemari || isNaN(slotNum) || slotNum <= 0;
+
+                                      const nisStr = s.nis ? s.nis.trim() : '';
+                                      const rawKamar = (s.kamar || '').trim();
+                                      const roomNameFormatted = rawKamar.toLowerCase().startsWith('kamar') ? rawKamar : `Kamar ${rawKamar}`;
+                                      const roomText = isBelumKamar
+                                        ? 'Belum dapat kamar'
+                                        : `${roomNameFormatted} (${isBelumLemari ? 'Belum dapat lemari' : String(slotNum).padStart(2, '0')})`;
+
+                                      const subtitleText = nisStr ? `${nisStr} &bull; ${roomText}` : roomText;
+
+                                      return (
+                                        <div
+                                          key={s.id}
+                                          onClick={() => setSelectedModalStudentIds([...selectedModalStudentIds, s.id])}
+                                          className="p-2.5 rounded-xl border border-slate-100 bg-white hover:bg-emerald-50/40 hover:border-emerald-200 transition-all cursor-pointer flex items-center justify-between gap-3 shadow-3xs group"
+                                        >
+                                          <div className="flex items-center gap-3 min-w-0">
+                                            {renderSantriAvatar(s, "w-8 h-8 rounded-full border border-slate-200 text-xs font-bold shrink-0")}
+                                            <div className="min-w-0">
+                                              <p className="text-xs font-extrabold text-slate-800 truncate">{s.nama}</p>
+                                              <p className="text-[10px] text-slate-500 truncate" dangerouslySetInnerHTML={{ __html: subtitleText }} />
+                                            </div>
+                                          </div>
+                                          <button className="p-1 rounded-lg bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors shrink-0 cursor-pointer">
+                                            <Plus className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
-                              <button className="p-1 rounded-lg bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors shrink-0 cursor-pointer">
-                                <Plus className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     </div>
 
                     {/* Right Column: Santri Dipilih */}
-                    <div className="flex flex-col h-full overflow-hidden bg-slate-50/30">
+                    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-slate-50/30">
                       <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
                         <span className="text-xs font-extrabold text-slate-800">Santri Dipilih</span>
                         <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
@@ -2174,7 +2650,7 @@ export default function KamarSub({
                       </div>
 
                       {/* Selected List */}
-                      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
                         {selectedStudentsForModal.length === 0 ? (
                           <div className="h-full flex flex-col items-center justify-center p-8 text-center min-h-[260px]">
                             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mb-2 border border-slate-200/80">
@@ -2186,18 +2662,33 @@ export default function KamarSub({
                             </p>
                           </div>
                         ) : (
-                          selectedStudentsForModal.map(s => (
-                            <div
-                              key={s.id}
-                              className="p-2.5 rounded-xl border border-emerald-100 bg-emerald-50/40 flex items-center justify-between gap-3 shadow-3xs"
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                {renderSantriAvatar(s, "w-8 h-8 rounded-full border border-emerald-200 text-xs font-bold shrink-0")}
-                                <div className="min-w-0">
-                                  <p className="text-xs font-extrabold text-slate-900 truncate">{s.nama}</p>
-                                  <p className="text-[10px] text-slate-500 truncate">NIS: {s.nis || '-'}</p>
+                          selectedStudentsForModal.map(s => {
+                            const kamarNorm = (s.kamar || '').trim().toLowerCase();
+                            const isBelumKamar = !kamarNorm || kamarNorm === 'tanpa kamar' || kamarNorm === 'belum kamar';
+                            const slotNum = parseInt(s.nomorLemari || '0', 10);
+                            const isBelumLemari = !s.nomorLemari || isNaN(slotNum) || slotNum <= 0;
+
+                            const nisStr = s.nis ? s.nis.trim() : '';
+                            const rawKamar = (s.kamar || '').trim();
+                            const roomNameFormatted = rawKamar.toLowerCase().startsWith('kamar') ? rawKamar : `Kamar ${rawKamar}`;
+                            const roomText = isBelumKamar
+                              ? 'Belum dapat kamar'
+                              : `${roomNameFormatted} (${isBelumLemari ? 'Belum dapat lemari' : String(slotNum).padStart(2, '0')})`;
+
+                            const subtitleText = nisStr ? `${nisStr} &bull; ${roomText}` : roomText;
+
+                            return (
+                              <div
+                                key={s.id}
+                                className="p-2.5 rounded-xl border border-emerald-100 bg-emerald-50/40 flex items-center justify-between gap-3 shadow-3xs"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  {renderSantriAvatar(s, "w-8 h-8 rounded-full border border-emerald-200 text-xs font-bold shrink-0")}
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-extrabold text-slate-900 truncate">{s.nama}</p>
+                                    <p className="text-[10px] text-slate-500 truncate" dangerouslySetInnerHTML={{ __html: subtitleText }} />
+                                  </div>
                                 </div>
-                              </div>
                               <button
                                 onClick={() => setSelectedModalStudentIds(selectedModalStudentIds.filter(id => id !== s.id))}
                                 className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 cursor-pointer"
@@ -2206,7 +2697,8 @@ export default function KamarSub({
                                 <X className="w-4 h-4" />
                               </button>
                             </div>
-                          ))
+                          );
+                        })
                         )}
                       </div>
                     </div>
@@ -2367,6 +2859,123 @@ export default function KamarSub({
         )}
       </AnimatePresence>
 
+      {/* --- MODAL PINDAH LEMARI --- */}
+      <AnimatePresence>
+        {editingLemariStudent && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-purple-50 text-purple-700 border border-purple-100">
+                    <DoorClosed className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-800">
+                      Pindah Lemari Santri
+                    </h3>
+                    <p className="text-[11px] font-semibold text-slate-500">
+                      {editingLemariStudent.nama} &bull; {editingLemariStudent.kamar || activeRoomForDetail?.nama || '-'}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setEditingLemariStudent(null)} 
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {(() => {
+                const targetRoomObj = activeRoomForDetail || kamarList.find(r => r.nama === editingLemariStudent.kamar);
+                const capacity = targetRoomObj?.kapasitas || activeRoomForDetail?.kapasitas || 15;
+                const membersInRoom = targetRoomObj ? getMembersOfRoom(targetRoomObj.nama) : currentRoomMembers;
+
+                return (
+                  <div className="space-y-3.5">
+                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-xs text-slate-600 space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="font-semibold text-slate-500">Lemari Saat Ini:</span>
+                        <span className="font-extrabold text-purple-700 bg-purple-50 border border-purple-100 px-2.5 py-0.5 rounded-lg text-[11px]">
+                          {editingLemariStudent.nomorLemari && parseInt(editingLemariStudent.nomorLemari, 10) > 0
+                            ? `Lemari ${String(editingLemariStudent.nomorLemari).padStart(2, '0')}`
+                            : 'Belum Dapat Lemari'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1.5">
+                        Pilih Lemari Tujuan
+                      </label>
+                      <select
+                        value={tempLemariValue}
+                        onChange={e => setTempLemariValue(e.target.value)}
+                        className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-purple-500/20 bg-white"
+                      >
+                        <option value="">-- Belum Dapat Lemari (Kosongkan) --</option>
+                        {Array.from({ length: capacity }, (_, i) => i + 1).map(slotNum => {
+                          const slotStr = String(slotNum);
+                          const occupants = membersInRoom.filter(s => {
+                            const num = parseInt(s.nomorLemari || '0', 10);
+                            return num === slotNum || s.nomorLemari === slotStr;
+                          });
+
+                          let occupantText = 'Kosong';
+                          if (occupants.length > 0) {
+                            occupantText = occupants.map(s => {
+                              if (s.id === editingLemariStudent.id) return `${s.nama} (Saat Ini)`;
+                              return s.nama;
+                            }).join(', ');
+                          }
+
+                          return (
+                            <option key={slotNum} value={slotStr}>
+                              Lemari {String(slotNum).padStart(2, '0')} — ({occupantText})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingLemariStudent(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const roomName = editingLemariStudent.kamar || activeRoomForDetail?.nama || '';
+                    onUpdateSantriRoom(editingLemariStudent.id, roomName, tempLemariValue.trim());
+                    if (tempLemariValue.trim()) {
+                      showToast(`Lemari "${editingLemariStudent.nama}" berhasil diubah ke No. ${String(tempLemariValue.trim()).padStart(2, '0')}.`);
+                    } else {
+                      showToast(`Santri "${editingLemariStudent.nama}" diset belum mendapat lemari.`);
+                    }
+                    setEditingLemariStudent(null);
+                  }}
+                  className={`px-4 py-2 text-xs font-bold text-white rounded-xl ${bgClass} shadow-xs hover:opacity-90 cursor-pointer transition-all`}
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* --- SANTRI DETAIL MODAL --- */}
       {selectedSantriForDetail && (
         <SantriDetailModal
@@ -2457,63 +3066,133 @@ export default function KamarSub({
                 </>
               )}
 
-              {menuDropdown.type === 'santri' && (
-                <>
-                  <button
-                    onClick={() => {
-                      const s = menuDropdown.data as Santri;
-                      setMenuDropdown(null);
-                      askConfirmation(
-                        'Jadikan Ketua Kamar',
-                        `Apakah Anda yakin ingin menjadikan "${s.nama}" sebagai ketua kamar ini?`,
-                        () => {
-                          if (activeRoomForDetail) {
-                            const updated = { ...activeRoomForDetail, ketuaKamar: s.nama };
-                            onUpdateKamar(updated);
-                            setActiveRoomForDetail(updated);
-                            showToast(`Santri "${s.nama}" berhasil dijadikan Ketua Kamar.`);
-                          }
-                        },
-                        'Ya, Jadikan Ketua',
-                        false
-                      );
-                    }}
-                    className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
-                  >
-                    Jadikan Ketua
-                  </button>
-                  <button
-                    onClick={() => {
-                      const s = menuDropdown.data as Santri;
-                      setMenuDropdown(null);
-                      setSingleTransferStudent(s);
-                      setSingleDestKompleksId(selectedKompleksId || '');
-                      setSingleDestRoomId(activeRoomForDetail?.id || '');
-                      setSingleNomorLemari(s.nomorLemari || '');
-                    }}
-                    className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
-                  >
-                    Pindah
-                  </button>
-                  <button
-                    onClick={() => {
-                      const s = menuDropdown.data as Santri;
-                      setMenuDropdown(null);
-                      askConfirmation(
-                        'Keluarkan Santri',
-                        `Apakah Anda yakin ingin mengeluarkan santri "${s.nama}" dari kamar ini?`,
-                        () => {
-                          onUpdateSantriRoom(s.id, '');
-                          showToast(`Santri "${s.nama}" dikeluarkan dari kamar.`);
+              {menuDropdown.type === 'santri' && (() => {
+                const s = menuDropdown.data as Santri;
+                const isKetua = Boolean(
+                  activeRoomForDetail?.ketuaKamar &&
+                  activeRoomForDetail.ketuaKamar.trim().toLowerCase() === s.nama.trim().toLowerCase()
+                );
+
+                return (
+                  <>
+                    <button
+                      onClick={() => {
+                        setMenuDropdown(null);
+                        if (isKetua) {
+                          askConfirmation(
+                            'Copot Ketua Kamar',
+                            `Apakah Anda yakin ingin mencopot "${s.nama}" dari Ketua Kamar?`,
+                            () => {
+                              if (activeRoomForDetail) {
+                                const updated = { ...activeRoomForDetail, ketuaKamar: '' };
+                                onUpdateKamar(updated);
+                                setActiveRoomForDetail(updated);
+                                showToast(`Santri "${s.nama}" berhasil dicopot dari Ketua Kamar.`);
+                              }
+                            },
+                            'Ya, Copot Ketua',
+                            true
+                          );
+                        } else {
+                          askConfirmation(
+                            'Jadikan Ketua Kamar',
+                            `Apakah Anda yakin ingin menjadikan "${s.nama}" sebagai ketua kamar ini?`,
+                            () => {
+                              if (activeRoomForDetail) {
+                                const updated = { ...activeRoomForDetail, ketuaKamar: s.nama };
+                                onUpdateKamar(updated);
+                                setActiveRoomForDetail(updated);
+                                showToast(`Santri "${s.nama}" berhasil dijadikan Ketua Kamar.`);
+                              }
+                            },
+                            'Ya, Jadikan Ketua',
+                            false
+                          );
                         }
-                      );
-                    }}
-                    className="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600 transition-colors cursor-pointer border-t border-slate-100"
-                  >
-                    Keluarkan
-                  </button>
-                </>
-              )}
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
+                    >
+                      {isKetua ? 'Copot Ketua' : 'Jadikan Ketua'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuDropdown(null);
+                        setIsSelectionMode(true);
+                        setSelectedStudentIds([s.id]);
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-purple-50 text-purple-700 transition-colors cursor-pointer"
+                    >
+                      Pilih
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuDropdown(null);
+                        setSingleTransferStudent(s);
+                        setSingleDestKompleksId(selectedKompleksId || '');
+                        setSingleDestRoomId(activeRoomForDetail?.id || '');
+                        setSingleNomorLemari(s.nomorLemari || '');
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
+                    >
+                      Pindah Kamar
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuDropdown(null);
+                        setEditingLemariStudent(s);
+                        setTempLemariValue(s.nomorLemari || '');
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
+                    >
+                      Pindah Lemari
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuDropdown(null);
+                        askConfirmation(
+                          'Hapus Lemari Santri',
+                          `Apakah Anda yakin ingin menghapus nomor lemari dari "${s.nama}"?`,
+                          () => {
+                            if (activeRoomForDetail) {
+                              onUpdateSantriRoom(s.id, activeRoomForDetail.nama, '');
+                              showToast(`Nomor lemari "${s.nama}" berhasil dihapus.`);
+                            }
+                          }
+                        );
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-amber-50 text-amber-700 transition-colors cursor-pointer"
+                    >
+                      Hapus Lemari
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuDropdown(null);
+                        const slotNum = parseInt(s.nomorLemari || '0', 10);
+                        handleOpenAddMemberModal(slotNum > 0 ? slotNum : undefined);
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-purple-50 text-purple-700 transition-colors cursor-pointer"
+                    >
+                      Tambah Pengguna
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuDropdown(null);
+                        askConfirmation(
+                          'Keluarkan Santri',
+                          `Apakah Anda yakin ingin mengeluarkan santri "${s.nama}" dari kamar ini?`,
+                          () => {
+                            onUpdateSantriRoom(s.id, '');
+                            showToast(`Santri "${s.nama}" dikeluarkan dari kamar.`);
+                          }
+                        );
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600 transition-colors cursor-pointer border-t border-slate-100"
+                    >
+                      Keluarkan
+                    </button>
+                  </>
+                );
+              })()}
             </motion.div>
           </>
         )}
